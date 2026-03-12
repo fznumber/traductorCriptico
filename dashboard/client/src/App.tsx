@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Terminal, Play, Loader } from 'lucide-react';
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
 
 function App() {
   const [prompt, setPrompt] = useState('');
