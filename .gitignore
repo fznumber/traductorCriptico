@@ -1,0 +1,24 @@
+# Node
+node_modules/
+dist/
+.env
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+# (Mantenemos thinking.txt y RESULTADO_FASE1.md ya que son parte del flujo del repo en este caso,
+# pero si prefieres ignorarlos, avísame)
+# workspaces/*/.openclaw/
