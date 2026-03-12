@@ -12,10 +12,19 @@ if [ ! -f "$INPUT" ]; then
     exit 1
 fi
 
+# Cargar variables de entorno desde .env
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
+# Valores por defecto
+PROVIDER=${LLM_PROVIDER:-ollama}
+
 echo "Iniciando análisis de Fase 1 (Mandato de Idioma: ESPAÑOL)..."
+echo "Usando Proveedor: $PROVIDER"
 echo "-------------------------------------------------------"
 
-# Función para ejecutar un agente usando curl directo a Ollama
+# Función para ejecutar un agente usando el proveedor configurado
 ejecutar_agente() {
     local nombre=$1
     local path=$2
@@ -36,28 +45,45 @@ ejecutar_agente() {
     TEXTO A ANALIZAR (Thinking):
     $(cat "$INPUT_ABS")"
 
-    # Llamada directa a Ollama
-    local response=$(curl -s -X POST http://127.0.0.1:11434/v1/chat/completions \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"model\": \"qwen3.5:4b\",
-            \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt_final" | jq -Rs .)}],
-            \"stream\": false
-        }")
+    local response
+    local content
 
-    # Extraer el contenido usando jq (probamos content y reasoning por si el modelo lo separa)
-    local content=$(echo "$response" | jq -r '.choices[0].message.content // ""')
-    local reasoning=$(echo "$response" | jq -r '.choices[0].message.reasoning // ""')
+    if [ "$PROVIDER" == "anthropic" ]; then
+        # Petición a Claude
+        response=$(curl -s -X POST https://api.anthropic.com/v1/messages \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "{
+                \"model\": \"${ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}\",
+                \"max_tokens\": 4096,
+                \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt_final" | jq -Rs .)}]
+            }")
+        content=$(echo "$response" | jq -r '.content[0].text // ""')
+    else
+        # Petición a Ollama
+        response=$(curl -s -X POST ${OLLAMA_URL:-http://127.0.0.1:11434/v1/chat/completions} \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"model\": \"${OLLAMA_MODEL:-qwen3.5:4b}\",
+                \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt_final" | jq -Rs .)}],
+                \"stream\": false
+            }")
+        
+        # Extraer el contenido usando jq (probamos content y reasoning)
+        content=$(echo "$response" | jq -r '.choices[0].message.content // ""')
+        local reasoning=$(echo "$response" | jq -r '.choices[0].message.reasoning // ""')
+        
+        if [ -z "$content" ] && [ -n "$reasoning" ] && [ "$reasoning" != "null" ]; then
+            content="### Razonamiento Crítico (Thinking Extraído):\n$reasoning"
+        fi
+    fi
 
     if [ -n "$content" ] && [ "$content" != "null" ]; then
-        echo "$content" > "$path/RESULTADO_FASE1.md"
+        echo -e "$content" > "$path/RESULTADO_FASE1.md"
         echo "   [OK] Guardado en $path/RESULTADO_FASE1.md"
-    elif [ -n "$reasoning" ] && [ "$reasoning" != "null" ]; then
-        echo "### Razonamiento Crítico (Thinking Extraído):" > "$path/RESULTADO_FASE1.md"
-        echo "$reasoning" >> "$path/RESULTADO_FASE1.md"
-        echo "   [OK] Guardado (desde reasoning) en $path/RESULTADO_FASE1.md"
     else
-        echo "   [!] Error en $nombre. Respuesta vacía o formato desconocido."
+        echo "   [!] Error en $nombre. Respuesta vacía o error de red."
         echo "Respuesta completa para depuración: $response" >> "$path/RESULTADO_FASE1.md"
     fi
 }
