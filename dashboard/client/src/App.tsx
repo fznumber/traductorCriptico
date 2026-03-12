@@ -8,7 +8,7 @@ function App() {
   const [status, setStatus] = useState('idle'); 
   const [log, setLog] = useState('');
   const [results, setResults] = useState<any>({});
-  const [activeTab, setActiveTab] = useState('ausencias');
+  const [activeTab, setActiveTab] = useState('thinking');
 
   const runPipeline = async () => {
     if (!prompt) return;
@@ -26,6 +26,9 @@ function App() {
       
       if (genData.success) {
         setLog(prev => prev + '>> Thinking capturado en thinking.txt\n');
+        setResults((prev: any) => ({ ...prev, thinking: genData.thinking }));
+        setActiveTab('thinking');
+        
         setStatus('processing');
         setLog(prev => prev + '>> Orquestando 4 agentes en OpenClaw...\n');
         
@@ -36,7 +39,7 @@ function App() {
         
         const resRes = await fetch(`${API_BASE}/results`);
         const data = await resRes.json();
-        setResults(data);
+        setResults((prev: any) => ({ ...prev, ...data }));
         setStatus('completed');
       }
     } catch (err: any) {
@@ -80,7 +83,7 @@ function App() {
 
           <section className="results">
             <div className="tabs">
-              {['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'].map(tab => (
+              {['thinking', 'ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'].map(tab => (
                 <button 
                   key={tab} 
                   className={activeTab === tab ? 'active' : ''} 
@@ -91,7 +94,9 @@ function App() {
               ))}
             </div>
             <div className="content-viewer">
-              <pre>{results[activeTab] || 'No hay datos de análisis disponibles para esta fase.'}</pre>
+              <pre style={{ color: activeTab === 'thinking' ? '#81d4fa' : '#ccc' }}>
+                {results[activeTab] || 'No hay datos de análisis disponibles para esta fase.'}
+              </pre>
             </div>
           </section>
         </div>

@@ -59,6 +59,12 @@ app.post('/api/run-phase-1', (req, res) => {
 app.get('/api/results', (req, res) => {
     const results = {};
     
+    // Incluir thinking inicial
+    const thinkingPath = path.join(ROOT_PATH, 'thinking.txt');
+    if (fs.existsSync(thinkingPath)) {
+        results['thinking'] = fs.readFileSync(thinkingPath, 'utf-8');
+    }
+
     WORKSPACES.forEach(agent => {
         const filePath = path.join(ROOT_PATH, 'workspaces', agent, 'RESULTADO_FASE1.md');
         if (fs.existsSync(filePath)) {
