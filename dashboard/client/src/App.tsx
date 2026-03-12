@@ -118,10 +118,10 @@ function App() {
         .console, .results { background: var(--panel); border: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; height: 100%; }
         .panel-header { padding: 8px 12px; background: #1a1a1a; font-size: 11px; border-bottom: 1px solid var(--border); color: var(--dim); letter-spacing: 1px; }
         .content-viewer { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
-        pre { padding: 20px; margin: 0; overflow-y: auto; font-size: 14px; white-space: pre-wrap; line-height: 1.6; color: #a5d6a7; flex: 1; }
+        pre { padding: 20px; margin: 0; overflow: auto; font-size: 14px; white-space: pre; line-height: 1.6; color: #a5d6a7; flex: 1; }
         
-        /* Scrollbar estilizado */
-        pre::-webkit-scrollbar { width: 6px; }
+        /* Scrollbar estilizado (Vertical y Horizontal) */
+        pre::-webkit-scrollbar { width: 6px; height: 6px; }
         pre::-webkit-scrollbar-track { background: transparent; }
         pre::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
         pre::-webkit-scrollbar-thumb:hover { background: var(--accent); }
