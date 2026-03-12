@@ -115,10 +115,18 @@ function App() {
         button { background: var(--accent); color: black; border: none; padding: 0 25px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; font-family: inherit; }
         button:disabled { background: var(--dim); cursor: not-allowed; }
         .dashboard-grid { display: grid; grid-template-columns: 350px 1fr; gap: 20px; flex: 1; min-height: 0; }
-        .console, .results { background: var(--panel); border: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+        .console, .results { background: var(--panel); border: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; height: 100%; }
         .panel-header { padding: 8px 12px; background: #1a1a1a; font-size: 11px; border-bottom: 1px solid var(--border); color: var(--dim); letter-spacing: 1px; }
-        pre { padding: 15px; margin: 0; overflow-y: auto; font-size: 13px; white-space: pre-wrap; line-height: 1.6; color: #a5d6a7; flex: 1; }
-        .tabs { display: flex; border-bottom: 1px solid var(--border); background: #0d0d0d; }
+        .content-viewer { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+        pre { padding: 20px; margin: 0; overflow-y: auto; font-size: 14px; white-space: pre-wrap; line-height: 1.6; color: #a5d6a7; flex: 1; }
+        
+        /* Scrollbar estilizado */
+        pre::-webkit-scrollbar { width: 6px; }
+        pre::-webkit-scrollbar-track { background: transparent; }
+        pre::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+        pre::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+        .tabs { display: flex; border-bottom: 1px solid var(--border); background: #0d0d0d; flex-shrink: 0; }
         .tabs button { flex: 1; background: transparent; color: var(--dim); border: none; border-right: 1px solid var(--border); padding: 12px; font-size: 10px; font-weight: bold; cursor: pointer; }
         .tabs button.active { color: var(--accent); background: var(--panel); }
         .content-viewer pre { color: #ccc; }
