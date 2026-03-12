@@ -30,17 +30,32 @@ function App() {
         setActiveTab('thinking');
         
         setStatus('processing');
-        setLog(prev => prev + '>> Orquestando 4 agentes en OpenClaw...\n');
+        setLog(prev => prev + '>> Orquestando 4 agentes en OpenClaw (Segundo plano)...\n');
         
-        const runRes = await fetch(`${API_BASE}/run-phase-1`, { method: 'POST' });
-        const runData = await runRes.json();
-        
-        setLog(prev => prev + (runData.log || 'Fase 1 completada.') + '\n');
-        
-        const resRes = await fetch(`${API_BASE}/results`);
-        const data = await resRes.json();
-        setResults((prev: any) => ({ ...prev, ...data }));
-        setStatus('completed');
+        // Iniciamos la ejecución en el servidor
+        await fetch(`${API_BASE}/run-phase-1`, { method: 'POST' });
+
+        // Función de Polling para actualizar resultados cada 2 segundos
+        const pollInterval = setInterval(async () => {
+          try {
+            const resRes = await fetch(`${API_BASE}/results`);
+            const data = await resRes.json();
+            setResults((prev: any) => ({ ...prev, ...data }));
+
+            // Si todos los agentes han respondido (no dicen "Esperando..."), paramos el polling
+            const allDone = Object.values(data).every(val => !String(val).startsWith('Esperando result'));
+            if (allDone) {
+              clearInterval(pollInterval);
+              setStatus('completed');
+              setLog(prev => prev + '>> Todos los agentes han finalizado el análisis.\n');
+            }
+          } catch (e) {
+            console.error('Error polling:', e);
+          }
+        }, 2500);
+
+        // Seguridad: parar polling tras 5 minutos máximo
+        setTimeout(() => clearInterval(pollInterval), 300000);
       }
     } catch (err: any) {
       setLog(prev => prev + '!! Error: ' + err.message + '\n');

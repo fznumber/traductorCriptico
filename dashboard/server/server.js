@@ -10,7 +10,12 @@ const fetch = require('node-fetch');
 const app = express();
 const PORT = 3001;
 
-app.use(cors());
+// Configuración de CORS abierta para túneles públicos
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'anthropic-version']
+}));
 app.use(bodyParser.json());
 
 const ROOT_PATH = path.resolve(__dirname, '../../');
@@ -73,16 +78,20 @@ app.post('/api/generate-thinking', async (req, res) => {
     }
 });
 
-// 2. Ejecutar Fase 1 (Agentes OpenClaw)
+// 2. Ejecutar Fase 1 (Agentes OpenClaw) - ASÍNCRONO para evitar Timeouts
 app.post('/api/run-phase-1', (req, res) => {
     console.log('>> Iniciando Fase 1 (Orquestación de Agentes)...');
     
+    // Respondemos inmediatamente al cliente
+    res.json({ success: true, message: 'Proceso iniciado en segundo plano' });
+
+    // Ejecutamos el script sin esperar a que termine para la respuesta HTTP
     exec('bash ejecutar_fase1.sh', { cwd: ROOT_PATH }, (error, stdout, stderr) => {
         if (error) {
             console.error(`Error script: ${error}`);
-            return res.status(500).json({ error: 'Error en la ejecución de agentes' });
+            return;
         }
-        res.json({ success: true, log: stdout });
+        console.log('>> Fase 1 completada exitosamente.');
     });
 });
 
