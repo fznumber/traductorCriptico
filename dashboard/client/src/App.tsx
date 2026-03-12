@@ -106,15 +106,16 @@ function App() {
         :root { --bg: #0a0a0a; --panel: #141414; --border: #333; --text: #e0e0e0; --accent: #00ff41; --dim: #666; }
         body { margin: 0; font-family: 'Courier New', monospace; background: var(--bg); color: var(--text); overflow: hidden; }
         .app-container { display: flex; flex-direction: column; height: 100vh; padding: 20px; box-sizing: border-box; }
-        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 15px; margin-bottom: 20px; }
+        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 15px; margin-bottom: 20px; flex-shrink: 0; }
+        main { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
         .logo { display: flex; align-items: center; gap: 12px; color: var(--accent); }
         .status-badge { font-size: 11px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 2px; display: flex; align-items: center; gap: 6px; color: var(--dim); }
-        .input-panel { display: flex; gap: 10px; margin-bottom: 20px; }
+        .input-panel { display: flex; gap: 10px; margin-bottom: 20px; flex-shrink: 0; }
         input { flex: 1; background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 12px 15px; font-family: inherit; font-size: 15px; outline: none; }
         input:focus { border-color: var(--accent); }
         button { background: var(--accent); color: black; border: none; padding: 0 25px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; font-family: inherit; }
         button:disabled { background: var(--dim); cursor: not-allowed; }
-        .dashboard-grid { display: grid; grid-template-columns: 350px 1fr; gap: 20px; flex: 1; min-height: 0; }
+        .dashboard-grid { display: grid; grid-template-columns: 350px 1fr; gap: 20px; flex: 1; min-height: 0; overflow: hidden; }
         .console, .results { background: var(--panel); border: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; height: 100%; }
         .panel-header { padding: 8px 12px; background: #1a1a1a; font-size: 11px; border-bottom: 1px solid var(--border); color: var(--dim); letter-spacing: 1px; }
         .content-viewer { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
