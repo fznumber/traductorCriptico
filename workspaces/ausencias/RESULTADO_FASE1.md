@@ -1,15 +1,35 @@
-- **Tradición Ausente: Crítica del Imperialismo y Memoria Histórica**
-    - **Descripción de Aporte:** Habría contextualizado la retórica de Trump sobre Irán dentro de la larga historia de intervenciones estadounidenses en el Medio Oriente, permitiendo un análisis que no se limite al periodo 2017-2021, sino que revele la continuidad estructural de la política exterior de EE. UU. como un actor dominante, identificando los patrones recurrentes de intervención y su impacto en la legitimidad regional.
-    - **Clasificación de Ausencia:** Histórica / Geopolítica
+### 1. Tradición Anti-Estatista / Anarquista
+**Descripción:**
+Qué aportaría: Transformaría la premisa de "garantía" en una crítica a la coacción jerárquica. El análisis se desplazaría hacia la autonomía del ciudadano frente a la autoridad coercitiva, viendo la seguridad como un bien colectivo que solo puede ser asegurado sin la institución del Estado central.
+**Clasificación:**
+Geopolítica, Temática y Política.
 
-- **Tradición Ausente: Sociología Política y Polarización Interna**
-    - **Descripción de Aporte:** Se habría analizado la retórica de guerra no solo como una herramienta de presión externa, sino como un mecanismo de consolidación del consenso interno, reflejando dinámicas de polarización y la capacidad de EE. UU. para justificar conflictos mediante la narrativa de seguridad nacional.
-    - **Clasificación de Ausencia:** Epistémica / Temática
+### 2. Marxismo Crítico / Sociología del Estado (Marx, Debord)
+**Descripción:**
+Qué aportaría: Reemplazaría la visión de "protección jurídica" por una función de reprimisión de la clase trabajadora. El Estado garantizaría la seguridad del capital, no el ciudadano, mediante la disciplina y el control disciplinario.
+**Clasificación:**
+Temática y Epistémica.
 
-- **Tradición Ausente: Relación de Poder Regional (Eje de Resistencia)**
-    - **Descripción de Aporte:** Se habría incluido una perspectiva que no centralice en la dicotomía binaria EE. UU.-Irán, sino que considere los actores regionales como actores constitutivos (ej. Arabia Saudita, Israel, FARC de Estado Sunita), evitando tratar el conflicto como un caso exclusivo de la política de Washington.
-    - **Clasificación de Ausencia:** Tradición Discursiva / Geopolítica
+### 3. Estudios de Seguridad Críticos / Poses (Agamben, Foucault)
+**Descripción:**
+Qué aportaría: Introduciría la idea de la "excepción normal" y la biopolítica. La garantía no sería una protección de derechos, sino una técnica de control donde la vida del cuerpo es gestionada como recurso político, no como objeto de protección.
+**Clasificación:**
+Epistémica, Geopolítica y Temática.
 
-- **Tradición Ausente: Filosofía de la Paz y Alternativas al Coercionar**
-    - **Descripción de Aporte:** Se habría introducido una reflexión sobre la limitación del enfoque de "Presión Máxima" en la resolución de conflictos, contrastando la agresividad retórica con marcos de diplomacia preventiva o gestión de crisis, cuestionando la eficacia del uso de amenazas militares para estabilizar regiones frágiles.
-    - **Clasificación de Ausencia: Temática / Temática
+### 4. Tradiciones No Occidentales / Filosofía del Imperio (Confucianismo, China, India)
+**Descripción:**
+Qué aportaría: Cambiaría el foco desde el "Contrato Social" (Occidente) hacia la armonía, la virtud o el orden cósmico donde el Estado garantiza como garante del cosmo, no del individuo. Sería una tradición basada en la desconfianza hacia la separación Estado-ciudadano.
+**Clasificación:**
+Histórica, Epistémica y Temática.
+
+### 5. Realismo Geopolítico / Militarista
+**Descripción:**
+Qué aportaría: Ignoraría la "garantía" interna y centraría la teoría en el uso de la guerra para asegurar intereses nacionales. El estado no garantiza a los súbditos, sino que es una extensión de poder para la expansión territorial o el dominio estratégico.
+**Clasificación:**
+Geopolítica y Temática.
+
+### 6. Economía Política de la Seguridad (Polanyi / Escritos Capitalistas)
+**Descripción:**
+Qué aportaría: Analizaría que los Estados no garantizan seguridad, sino que venden "seguridad" como un servicio pagado. La ausencia de derechos civiles sería naturalizada por la lógica del mercado.
+**Clasificación:**
+Temática y Epistémica.
