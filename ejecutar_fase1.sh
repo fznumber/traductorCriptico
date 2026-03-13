@@ -45,48 +45,56 @@ ejecutar_agente() {
     TEXTO A ANALIZAR (Thinking):
     $(cat "$INPUT_ABS")"
 
-    local response
-    local content
+    # Intentar hasta 2 veces por agente
+    local max_retries=2
+    local attempt=1
+    local success=false
 
-    if [ "$PROVIDER" == "anthropic" ]; then
-        # Petición a Claude
-        response=$(curl -s -X POST https://api.anthropic.com/v1/messages \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -d "{
-                \"model\": \"${ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}\",
-                \"max_tokens\": 4096,
-                \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt_final" | jq -Rs .)}]
-            }")
-        content=$(echo "$response" | jq -r '.content[0].text // ""')
-    else
-        # Petición a Ollama
-        response=$(curl -s -X POST ${OLLAMA_URL:-http://127.0.0.1:11434/v1/chat/completions} \
-            -H "Content-Type: application/json" \
-            -d "{
-                \"model\": \"${OLLAMA_MODEL:-qwen3.5:4b}\",
-                \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt_final" | jq -Rs .)}],
-                \"stream\": false
-            }")
-        
-        # Extraer el contenido usando jq (probamos content y reasoning)
-        content=$(echo "$response" | jq -r '.choices[0].message.content // ""')
-        local reasoning=$(echo "$response" | jq -r '.choices[0].message.reasoning // ""')
-        
-        if [ -z "$content" ] && [ -n "$reasoning" ] && [ "$reasoning" != "null" ]; then
-            content="### Razonamiento Crítico (Thinking Extraído):\n$reasoning"
+    while [ $attempt -le $max_retries ] && [ "$success" = false ]; do
+        echo "   [Intento $attempt] Llamando a la API..."
+
+        if [ "$PROVIDER" == "anthropic" ]; then
+            response=$(curl -s -X POST https://api.anthropic.com/v1/messages \
+                -H "Content-Type: application/json" \
+                -H "x-api-key: $ANTHROPIC_API_KEY" \
+                -H "anthropic-version: 2023-06-01" \
+                -d "{
+                    \"model\": \"${ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}\",
+                    \"max_tokens\": 4096,
+                    \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt_final" | jq -Rs .)}]
+                }")
+            content=$(echo "$response" | jq -r '.content[0].text // ""')
+        else
+            response=$(curl -s -X POST ${OLLAMA_URL:-http://127.0.0.1:11434/v1/chat/completions} \
+                -H "Content-Type: application/json" \
+                -d "{
+                    \"model\": \"${OLLAMA_MODEL:-qwen3.5:4b}\",
+                    \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt_final" | jq -Rs .)}],
+                    \"stream\": false
+                }")
+            content=$(echo "$response" | jq -r '.choices[0].message.content // ""')
+            local reasoning=$(echo "$response" | jq -r '.choices[0].message.reasoning // ""')
+            if [ -z "$content" ] && [ -n "$reasoning" ] && [ "$reasoning" != "null" ]; then
+                content="### Razonamiento Crítico (Thinking Extraído):\n$reasoning"
+            fi
         fi
-    fi
 
-    if [ -n "$content" ] && [ "$content" != "null" ]; then
-        echo -e "$content" > "$path/RESULTADO_FASE1.md"
-        echo "   [OK] Guardado en $path/RESULTADO_FASE1.md"
-    else
-        echo "   [!] Error en $nombre. Respuesta vacía o error de red."
-        echo "Respuesta completa para depuración: $response" >> "$path/RESULTADO_FASE1.md"
+        if [ -n "$content" ] && [ "$content" != "null" ] && [ "$content" != "" ]; then
+            echo -e "$content" > "$path/RESULTADO_FASE1.md"
+            echo "   [OK] Guardado en $path/RESULTADO_FASE1.md"
+            success=true
+        else
+            echo "   [!] Intento $attempt fallido. Respuesta: $response"
+            ((attempt++))
+            sleep 2
+        fi
+    done
+
+    if [ "$success" = false ]; then
+        echo "### ERROR DE ANÁLISIS\nNo se pudo obtener respuesta del modelo después de $max_retries intentos.\n\nRespuesta técnica: $response" > "$path/RESULTADO_FASE1.md"
+        echo "   [!] AGENTE FALLIDO: Se guardó informe de error en $path/RESULTADO_FASE1.md"
     fi
-}
+    }
 
 # Ejecución secuencial de los 4 agentes
 ejecutar_agente "BIFURCACIONES" "workspaces/bifurcaciones"

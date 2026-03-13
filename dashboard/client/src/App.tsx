@@ -61,10 +61,18 @@ function App() {
               String(val) === "Generando..."
             );
 
+            const anyFailed = Object.values(data).some(val => 
+              String(val).startsWith("### ERROR DE ANÁLISIS")
+            );
+
             if (!anyInProgress) {
               clearInterval(pollInterval);
               setStatus('completed');
-              setLog(prev => prev + '>> Todos los agentes han finalizado el análisis.\n');
+              if (anyFailed) {
+                setLog(prev => prev + '>> El análisis ha terminado, pero algunos agentes han reportado errores.\n');
+              } else {
+                setLog(prev => prev + '>> Todos los agentes han finalizado el análisis correctamente.\n');
+              }
             }
           } catch (e) {
             console.error('Error polling:', e);
