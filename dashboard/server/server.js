@@ -24,58 +24,65 @@ const WORKSPACES = ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion']
 // Configuración de proveedores
 const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
 
-// 1. Generar Thinking Inicial (Configurable)
+// 1. Generar Thinking Inicial (Configurable) - ASÍNCRONO para evitar Timeouts
 app.post('/api/generate-thinking', async (req, res) => {
     const { prompt } = req.body;
-    console.log(`>> Generando thinking con ${PROVIDER} para: "${prompt}"...`);
+    console.log(`>> Iniciando generación de thinking con ${PROVIDER}...`);
 
-    try {
-        let response;
-        let data;
-        let thinking = "";
-
-        if (PROVIDER === 'anthropic') {
-            // Configuración para Claude
-            response = await fetch('https://api.anthropic.com/v1/messages', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-key': process.env.ANTHROPIC_API_KEY,
-                    'anthropic-version': '2023-06-01'
-                },
-                body: JSON.stringify({
-                    model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022',
-                    max_tokens: 4096,
-                    messages: [{ role: 'user', content: prompt }]
-                })
-            });
-            data = await response.json();
-            thinking = data.content && data.content[0] && data.content[0].text || "";
-        } else {
-            // Configuración por defecto para Ollama
-            response = await fetch(process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: process.env.OLLAMA_MODEL || 'qwen3.5:4b',
-                    messages: [{ role: 'user', content: prompt }],
-                    stream: false
-                })
-            });
-            data = await response.json();
-            thinking = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || "";
-        }
-
-        if (!thinking && data.error) {
-            throw new Error(JSON.stringify(data.error));
-        }
-
-        fs.writeFileSync(path.join(ROOT_PATH, 'thinking.txt'), String(thinking));
-        res.json({ success: true, thinking });
-    } catch (error) {
-        console.error('Error API:', error);
-        res.status(500).json({ error: `Fallo al conectar con ${PROVIDER}: ${error.message}` });
+    // Borrar el thinking anterior para que el cliente sepa que está generando uno nuevo
+    const thinkingPath = path.join(ROOT_PATH, 'thinking.txt');
+    if (fs.existsSync(thinkingPath)) {
+        try { fs.unlinkSync(thinkingPath); } catch(e) {}
     }
+
+    // Respondemos de inmediato
+    res.json({ success: true, message: 'Generación de thinking iniciada' });
+
+    // Proceso en segundo plano
+    (async () => {
+        try {
+            let response;
+            let data;
+            let thinking = "";
+
+            if (PROVIDER === 'anthropic') {
+                response = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': process.env.ANTHROPIC_API_KEY,
+                        'anthropic-version': '2023-06-01'
+                    },
+                    body: JSON.stringify({
+                        model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022',
+                        max_tokens: 4096,
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                data = await response.json();
+                thinking = data.content && data.content[0] && data.content[0].text || "";
+            } else {
+                response = await fetch(process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: process.env.OLLAMA_MODEL || 'qwen3.5:4b',
+                        messages: [{ role: 'user', content: prompt }],
+                        stream: false
+                    })
+                });
+                data = await response.json();
+                thinking = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || "";
+            }
+
+            if (thinking) {
+                fs.writeFileSync(thinkingPath, String(thinking));
+                console.log('>> Thinking generado y guardado.');
+            }
+        } catch (error) {
+            console.error('Error generando thinking en segundo plano:', error);
+        }
+    })();
 });
 
 // 2. Ejecutar Fase 1 (Agentes OpenClaw) - ASÍNCRONO para evitar Timeouts

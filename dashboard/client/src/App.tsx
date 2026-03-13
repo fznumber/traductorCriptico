@@ -20,34 +20,42 @@ function App() {
     setActiveTab('thinking');
 
     try {
-      setLog(prev => prev + '>> Solicitando Thinking a Ollama (qwen3.5:4b)...\n');
-      const genRes = await fetch(`${API_BASE}/generate-thinking`, {
+      setLog(prev => prev + '>> Solicitando Thinking a ' + (PROVIDER.toUpperCase()) + ' (Segundo plano)...\n');
+      await fetch(`${API_BASE}/generate-thinking`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt })
       });
-      const genData = await genRes.json();
       
-      if (genData.success) {
-        setLog(prev => prev + '>> Thinking capturado en thinking.txt\n');
-        setResults((prev: any) => ({ ...prev, thinking: genData.thinking }));
-        setActiveTab('thinking');
+      let thinkingReady = false;
+
+      // Fase de espera del Thinking
+      const checkThinking = setInterval(async () => {
+        const resRes = await fetch(`${API_BASE}/results`);
+        const data = await resRes.json();
         
+        if (data.thinking && data.thinking !== 'Generando...') {
+          clearInterval(checkThinking);
+          setLog(prev => prev + '>> Thinking capturado exitosamente.\n');
+          setResults((prev: any) => ({ ...prev, ...data }));
+          thinkingReady = true;
+          startPhase1(); // Función para lanzar los agentes
+        }
+      }, 3000);
+
+      const startPhase1 = async () => {
         setStatus('processing');
-        setLog(prev => prev + '>> Orquestando 4 agentes en OpenClaw (Segundo plano)...\n');
+        setLog(prev => prev + '>> Orquestando 4 agentes en OpenClaw...\n');
         
-        // Iniciamos la ejecución en el servidor
         await fetch(`${API_BASE}/run-phase-1`, { method: 'POST' });
 
-        // Función de Polling para actualizar resultados cada 2 segundos
         const pollInterval = setInterval(async () => {
           try {
             const resRes = await fetch(`${API_BASE}/results`);
             const data = await resRes.json();
             setResults((prev: any) => ({ ...prev, ...data }));
 
-            // Si todos los agentes han respondido (no dicen "Esperando..."), paramos el polling
-            const allDone = Object.values(data).every(val => !String(val).startsWith('Esperando result'));
+            const allDone = Object.values(data).every(val => !String(val).startsWith('Esperando result') && !String(val).startsWith('Generando'));
             if (allDone) {
               clearInterval(pollInterval);
               setStatus('completed');
@@ -56,16 +64,19 @@ function App() {
           } catch (e) {
             console.error('Error polling:', e);
           }
-        }, 2500);
+        }, 3000);
 
-        // Seguridad: parar polling tras 5 minutos máximo
         setTimeout(() => clearInterval(pollInterval), 300000);
-      }
+      };
+
     } catch (err: any) {
       setLog(prev => prev + '!! Error: ' + err.message + '\n');
       setStatus('idle');
     }
   };
+
+  // Necesitamos que PROVIDER esté disponible en el cliente (podemos inferirlo o pasarlo)
+  const PROVIDER = "ollama"; // Esto se actualizará dinámicamente si es necesario
 
   return (
     <div className="app-container">
