@@ -12,8 +12,12 @@ function App() {
 
   const runPipeline = async () => {
     if (!prompt) return;
+    
+    // Resetear todo al inicio
     setStatus('generating');
     setLog('>> Iniciando proceso crítico para: "' + prompt + '"\n');
+    setResults({ thinking: 'Generando...' }); 
+    setActiveTab('thinking');
 
     try {
       setLog(prev => prev + '>> Solicitando Thinking a Ollama (qwen3.5:4b)...\n');

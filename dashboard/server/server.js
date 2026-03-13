@@ -82,6 +82,14 @@ app.post('/api/generate-thinking', async (req, res) => {
 app.post('/api/run-phase-1', (req, res) => {
     console.log('>> Iniciando Fase 1 (Orquestación de Agentes)...');
     
+    // Limpiar resultados anteriores para que el polling detecte que el proceso es nuevo
+    WORKSPACES.forEach(agent => {
+        const filePath = path.join(ROOT_PATH, 'workspaces', agent, 'RESULTADO_FASE1.md');
+        if (fs.existsSync(filePath)) {
+            try { fs.unlinkSync(filePath); } catch(e) {}
+        }
+    });
+
     // Respondemos inmediatamente al cliente
     res.json({ success: true, message: 'Proceso iniciado en segundo plano' });
 
