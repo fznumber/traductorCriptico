@@ -1,35 +1,21 @@
-### 1. Tradición Anti-Estatista / Anarquista
-**Descripción:**
-Qué aportaría: Transformaría la premisa de "garantía" en una crítica a la coacción jerárquica. El análisis se desplazaría hacia la autonomía del ciudadano frente a la autoridad coercitiva, viendo la seguridad como un bien colectivo que solo puede ser asegurado sin la institución del Estado central.
-**Clasificación:**
-Geopolítica, Temática y Política.
+# Ausencias Detectadas en el Razonamiento: Mapping de la Perspectiva Ausente
 
-### 2. Marxismo Crítico / Sociología del Estado (Marx, Debord)
-**Descripción:**
-Qué aportaría: Reemplazaría la visión de "protección jurídica" por una función de reprimisión de la clase trabajadora. El Estado garantizaría la seguridad del capital, no el ciudadano, mediante la disciplina y el control disciplinario.
-**Clasificación:**
-Temática y Epistémica.
+### 1. Tradición: Economía Política Crítica y Materialista
+**Descripción de la Aporte:** En lugar de "generar bienestar" como un fin abstracto de producción, este enfoque habría problematizado la distribución de la plusvalía y la estructura de clases que determina quién accede a la riqueza o quién acumula el capital excedente.
+**Clasificación:** Epistémica / Teórica.
 
-### 3. Estudios de Seguridad Críticos / Poses (Agamben, Foucault)
-**Descripción:**
-Qué aportaría: Introduciría la idea de la "excepción normal" y la biopolítica. La garantía no sería una protección de derechos, sino una técnica de control donde la vida del cuerpo es gestionada como recurso político, no como objeto de protección.
-**Clasificación:**
-Epistémica, Geopolítica y Temática.
+### 2. Tradición: Economía Ecológica y Límites Planetarios
+**Descripción de la Aporte:** Transformaría la "escaseidad" de ser una limitación cuantitativa de mercado a una violación del umbral regulatorio del planeta, redefiniendo los recursos no solo por disponibilidad, sino por tasa de degradación irreversible.
+**Clasificación:** Geopolítica / Naturalista.
 
-### 4. Tradiciones No Occidentales / Filosofía del Imperio (Confucianismo, China, India)
-**Descripción:**
-Qué aportaría: Cambiaría el foco desde el "Contrato Social" (Occidente) hacia la armonía, la virtud o el orden cósmico donde el Estado garantiza como garante del cosmo, no del individuo. Sería una tradición basada en la desconfianza hacia la separación Estado-ciudadano.
-**Clasificación:**
-Histórica, Epistémica y Temática.
+### 3. Tradición: Teorías Post-Coloniales y Anti-Extractivistas
+**Descripción de la Aporte:** Re-encuadraría la "gestión global" desde la lente de la transferencia de riqueza desiguales del Sur al Norte, no como una gestión de recursos "universal", sino como una dinámica colonial de transferencia de valor.
+**Clasificación:** Geopolítica / Ética.
 
-### 5. Realismo Geopolítico / Militarista
-**Descripción:**
-Qué aportaría: Ignoraría la "garantía" interna y centraría la teoría en el uso de la guerra para asegurar intereses nacionales. El estado no garantiza a los súbditos, sino que es una extensión de poder para la expansión territorial o el dominio estratégico.
-**Clasificación:**
-Geopolítica y Temática.
+### 4. Tradición: Economía Política del Cuidado y Feminista
+**Descripción de la Aporte:** La referencia al *oikos* (casa/household) se habría convertido en crítica al "oikós" del mercado doméstico vs. público, problematizando la invisibilidad del trabajo de reproducción social (el trabajo doméstico y reproductivo) que permite la "generación de bienestar".
+**Clasificación:** Social / Teórica.
 
-### 6. Economía Política de la Seguridad (Polanyi / Escritos Capitalistas)
-**Descripción:**
-Qué aportaría: Analizaría que los Estados no garantizan seguridad, sino que venden "seguridad" como un servicio pagado. La ausencia de derechos civiles sería naturalizada por la lógica del mercado.
-**Clasificación:**
-Temática y Epistémica.
+### 5. Tradición: Movimiento de Economía Post-Crecimiento / Degresiva
+**Descripción de la Aporte:** Reemplazaría el objetivo final de "generar bienestar" económico por uno de "equidad distributiva sin crecimiento económico", priorizando la suficiencia de las necesidades sobre la eficiencia productiva.
+**Clasificación:** Histórico / Político.
