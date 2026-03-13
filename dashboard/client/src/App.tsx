@@ -55,8 +55,13 @@ function App() {
             const data = await resRes.json();
             setResults((prev: any) => ({ ...prev, ...data }));
 
-            const allDone = Object.values(data).every(val => !String(val).startsWith('Esperando result') && !String(val).startsWith('Generando'));
-            if (allDone) {
+            // Detección robusta de finalización
+            const anyInProgress = Object.values(data).some(val => 
+              String(val) === "En proceso..." || 
+              String(val) === "Generando..."
+            );
+
+            if (!anyInProgress) {
               clearInterval(pollInterval);
               setStatus('completed');
               setLog(prev => prev + '>> Todos los agentes han finalizado el análisis.\n');

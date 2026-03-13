@@ -118,6 +118,8 @@ app.get('/api/results', (req, res) => {
     const thinkingPath = path.join(ROOT_PATH, 'thinking.txt');
     if (fs.existsSync(thinkingPath)) {
         results['thinking'] = fs.readFileSync(thinkingPath, 'utf-8');
+    } else {
+        results['thinking'] = "Generando...";
     }
 
     WORKSPACES.forEach(agent => {
@@ -125,7 +127,7 @@ app.get('/api/results', (req, res) => {
         if (fs.existsSync(filePath)) {
             results[agent] = fs.readFileSync(filePath, 'utf-8');
         } else {
-            results[agent] = `Esperando resultado de ${agent}...`;
+            results[agent] = "En proceso...";
         }
     });
     
