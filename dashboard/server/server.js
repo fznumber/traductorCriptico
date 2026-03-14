@@ -24,10 +24,10 @@ const WORKSPACES = ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion']
 // Configuración de proveedores
 const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
 
-// 1. Generar Thinking Inicial (Configurable) - ASÍNCRONO para evitar Timeouts
+// 1. Generar Thinking Inicial (Forzado OLLAMA para ahorro de costos)
 app.post('/api/generate-thinking', async (req, res) => {
     const { prompt } = req.body;
-    console.log(`>> Iniciando generación de thinking con ${PROVIDER}...`);
+    console.log(`>> Iniciando generación de thinking LOCAL (Ollama)...`);
 
     // Borrar el thinking anterior para que el cliente sepa que está generando uno nuevo
     const thinkingPath = path.join(ROOT_PATH, 'thinking.txt');
@@ -36,51 +36,49 @@ app.post('/api/generate-thinking', async (req, res) => {
     }
 
     // Respondemos de inmediato
-    res.json({ success: true, message: 'Generación de thinking iniciada' });
+    res.json({ success: true, message: 'Generación de thinking iniciada LOCALMENTE' });
 
-    // Proceso en segundo plano
+    // Proceso en segundo plano usando OLLAMA
     (async () => {
         try {
             let response;
             let data;
             let thinking = "";
 
-            if (PROVIDER === 'anthropic') {
-                response = await fetch('https://api.anthropic.com/v1/messages', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': process.env.ANTHROPIC_API_KEY,
-                        'anthropic-version': '2023-06-01'
-                    },
-                    body: JSON.stringify({
-                        model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022',
-                        max_tokens: 4096,
-                        messages: [{ role: 'user', content: prompt }]
-                    })
-                });
-                data = await response.json();
-                thinking = data.content && data.content[0] && data.content[0].text || "";
-            } else {
-                response = await fetch(process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model: process.env.OLLAMA_MODEL || 'qwen3.5:4b',
-                        messages: [{ role: 'user', content: prompt }],
-                        stream: false
-                    })
-                });
-                data = await response.json();
-                thinking = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || "";
+            // Forzamos Ollama para el thinking inicial para ahorrar costos de API
+            response = await fetch(process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: process.env.THINKING_MODEL || process.env.OLLAMA_MODEL || 'qwen3.5:4b',
+                    messages: [{ role: 'user', content: prompt }],
+                    stream: false
+                })
+            });
+            data = await response.json();
+            
+            const message = data.choices && data.choices[0] && data.choices[0].message;
+            if (message) {
+                const content = message.content || "";
+                // Algunos modelos usan 'reasoning_content', otros 'reasoning'
+                const reasoning = message.reasoning_content || message.reasoning || ""; 
+
+                if (reasoning) {
+                    // Concatenamos el razonamiento y la respuesta para que el agente tenga todo el contexto
+                    thinking = `<think>\n${reasoning}\n</think>\n\n${content}`;
+                } else {
+                    thinking = content;
+                }
             }
 
             if (thinking) {
                 fs.writeFileSync(thinkingPath, String(thinking));
-                console.log('>> Thinking generado y guardado.');
+                console.log('>> Thinking (con Razonamiento) generado LOCALMENTE y guardado.');
+            } else {
+                console.error('>> Error: El modelo Ollama no retornó contenido.');
             }
         } catch (error) {
-            console.error('Error generando thinking en segundo plano:', error);
+            console.error('Error generando thinking en segundo plano (Ollama):', error);
         }
     })();
 });
