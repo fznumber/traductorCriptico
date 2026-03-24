@@ -1,7 +1,19 @@
 import React, { useState } from 'react';
 import { Terminal, Play, Loader } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
+const getApiBase = () => {
+  // Detectar si estamos en entorno local
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  
+  if (isLocal) {
+    return 'http://localhost:3001/api';
+  }
+  
+  // Si no es local, usar la variable de entorno o una ruta relativa como fallback
+  return import.meta.env.VITE_API_BASE || '/api';
+};
+
+const API_BASE = getApiBase();
 
 function App() {
   const [prompt, setPrompt] = useState('');

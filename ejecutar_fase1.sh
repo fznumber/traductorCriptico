@@ -17,12 +17,17 @@ if [ -f .env ]; then
     export $(grep -v '^#' .env | xargs)
 fi
 
-# Valores FORZADOS para los Agentes (Para el análisis crítico usamos Anthropic API)
-PROVIDER=${AGENTS_PROVIDER:-anthropic}
-AGENTS_MODEL=${AGENTS_MODEL:-claude-haiku-4-5-20251001}
+# Configuración dinámica basada en el .env
+PROVIDER=${LLM_PROVIDER:-anthropic}
+
+if [ "$PROVIDER" == "anthropic" ]; then
+    MODELO_ACTUAL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+else
+    MODELO_ACTUAL=${OLLAMA_MODEL:-qwen3.5:4b}
+fi
 
 echo "Iniciando análisis de Fase 1 (Mandato de Idioma: ESPAÑOL)..."
-echo "Usando Proveedor: $PROVIDER ($AGENTS_MODEL)"
+echo "Usando Proveedor: $PROVIDER ($MODELO_ACTUAL)"
 echo "-------------------------------------------------------"
 
 # Función para ejecutar un agente usando el proveedor configurado
@@ -52,7 +57,7 @@ ejecutar_agente() {
     local success=false
 
     while [ $attempt -le $max_retries ] && [ "$success" = false ]; do
-        echo "   [Intento $attempt] Llamando a la API de Anthropic..."
+        echo "   [Intento $attempt] Llamando a la API de $PROVIDER..."
 
         if [ "$PROVIDER" == "anthropic" ]; then
             response=$(curl -s -X POST https://api.anthropic.com/v1/messages \
@@ -60,18 +65,18 @@ ejecutar_agente() {
                 -H "x-api-key: $ANTHROPIC_API_KEY" \
                 -H "anthropic-version: 2023-06-01" \
                 -d "{
-                    \"model\": \"$AGENTS_MODEL\",
+                    \"model\": \"$MODELO_ACTUAL\",
                     \"max_tokens\": 4096,
                     \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt_final" | jq -Rs .)}]
                 }")
             content=$(echo "$response" | jq -r '.content[0].text // ""')
         else
-            # Fallback a Ollama si el proveedor es forzado localmente
+            # Fallback a Ollama si el proveedor es local
             response=$(curl -s -X POST ${OLLAMA_URL:-http://127.0.0.1:11434/v1/chat/completions} \
                 -H "Content-Type: application/json" \
                 -H "Authorization: Bearer $OLLAMA_API_KEY" \
                 -d "{
-                    \"model\": \"${OLLAMA_MODEL:-qwen3.5:4b}\",
+                    \"model\": \"$MODELO_ACTUAL\",
                     \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt_final" | jq -Rs .)}],
                     \"stream\": false
                 }")
