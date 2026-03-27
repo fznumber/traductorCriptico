@@ -24,10 +24,12 @@ const WORKSPACES = ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion']
 // Configuración de proveedores
 const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
 
-// 1. Generar Thinking Inicial (Forzado OLLAMA para ahorro de costos)
+// 1. Generar Thinking Inicial — SIEMPRE usa Ollama (único modelo que expone chain-of-thought)
 app.post('/api/generate-thinking', async (req, res) => {
     const { prompt } = req.body;
-    console.log(`>> Iniciando generación de thinking LOCAL (Ollama)...`);
+    const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
+    const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3.5:4b';
+    console.log(`>> Iniciando generación de thinking con Ollama (${OLLAMA_MODEL})...`);
 
     // Borrar el thinking anterior para que el cliente sepa que está generando uno nuevo
     const thinkingPath = path.join(ROOT_PATH, 'thinking.txt');
@@ -38,59 +40,35 @@ app.post('/api/generate-thinking', async (req, res) => {
     // Respondemos de inmediato
     res.json({ success: true, message: 'Generación de thinking iniciada LOCALMENTE' });
 
-    // Proceso en segundo plano usando el proveedor configurado
+    // Proceso en segundo plano — siempre Ollama
     (async () => {
         try {
-            let response;
-            let data;
-            let thinking = "";
+            const response = await fetch(OLLAMA_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: OLLAMA_MODEL,
+                    messages: [{ role: 'user', content: prompt }],
+                    stream: false
+                })
+            });
+            const data = await response.json();
 
-            const PROVIDER = process.env.LLM_PROVIDER || 'anthropic';
-            console.log(`>> Usando proveedor: ${PROVIDER.toUpperCase()} para thinking.`);
-
-            if (PROVIDER === 'anthropic') {
-                // Configuración para Anthropic
-                response = await fetch('https://api.anthropic.com/v1/messages', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': process.env.ANTHROPIC_API_KEY,
-                        'anthropic-version': '2023-06-01'
-                    },
-                    body: JSON.stringify({
-                        model: process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001',
-                        max_tokens: 4096,
-                        messages: [{ role: 'user', content: prompt }]
-                    })
-                });
-                data = await response.json();
-                thinking = data.content && data.content[0] && data.content[0].text;
-            } else {
-                // Configuración para Ollama (u otros compatibles con OpenAI API local)
-                response = await fetch(process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model: process.env.OLLAMA_MODEL || 'qwen3.5:4b',
-                        messages: [{ role: 'user', content: prompt }],
-                        stream: false
-                    })
-                });
-                data = await response.json();
-                
-                const message = data.choices && data.choices[0] && data.choices[0].message;
-                if (message) {
-                    const content = message.content || "";
-                    const reasoning = message.reasoning_content || message.reasoning || ""; 
-                    thinking = reasoning ? `<think>\n${reasoning}\n</think>\n\n${content}` : content;
-                }
+            const message = data.choices && data.choices[0] && data.choices[0].message;
+            let thinking = '';
+            if (message) {
+                const content = message.content || '';
+                const reasoning = message.reasoning_content || message.reasoning || '';
+                thinking = reasoning
+                    ? `<think>\n${reasoning}\n</think>\n\n${content}`
+                    : content;
             }
 
             if (thinking) {
                 fs.writeFileSync(thinkingPath, String(thinking));
-                console.log(`>> Thinking generado vía ${PROVIDER.toUpperCase()} y guardado.`);
+                console.log(`>> Thinking generado con Ollama (${OLLAMA_MODEL}) y guardado.`);
             } else {
-                console.error(`>> Error: El modelo ${PROVIDER} no retornó contenido.`, data);
+                console.error('>> Error: Ollama no retornó contenido.', data);
             }
         } catch (error) {
             console.error('Error generando thinking en segundo plano:', error);
@@ -145,6 +123,106 @@ app.get('/api/results', (req, res) => {
     });
     
     res.json(results);
+});
+
+// 4. Generar Música de Fondo con ElevenLabs API
+app.post('/api/generate-music', async (req, res) => {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ success: false, error: 'query requerida' });
+
+    const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+    if (!ELEVENLABS_API_KEY || ELEVENLABS_API_KEY.includes('tu_')) {
+        return res.json({ success: false, error: 'Falta configurar ELEVENLABS_API_KEY en .env' });
+    }
+
+    console.log(`\n🎵 Iniciando generación de música (ElevenLabs) para: "${query}"`);
+
+    try {
+        // Paso 1: Pedirle a Claude que deduzca el prompt de música
+        console.log('   >> Consultando a Claude para deducir prompt de música...');
+        const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': process.env.ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+                model: process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001',
+                max_tokens: 200,
+                messages: [{
+                    role: 'user',
+                    content: `Eres un compositor musical. Dado el siguiente enunciado crítico o filosófico, genera UN prompt corto (máximo 20 palabras, en inglés) para una pieza instrumental de fondo que capture la tensión, el tono y la atmósfera conceptual del tema.
+
+Describe solo: género musical, mood, tempo e instrumentos principales. Sin comillas, sin explicaciones, solo el prompt.
+
+Enunciado: "${query}"`
+                }]
+            })
+        });
+        const claudeData = await claudeRes.json();
+        const musicPrompt = claudeData.content && claudeData.content[0] && claudeData.content[0].text
+            ? claudeData.content[0].text.trim()
+            : `Ambient instrumental, dark and tense, slow tempo, piano and strings, philosophical mood`;
+
+        console.log(`   >> Prompt generado: "${musicPrompt}"`);
+
+        // Paso 2: Llamar a ElevenLabs para generar audio corto (~22s) en un solo request
+        console.log('   >> Enviando prompt a ElevenLabs (esperando MP3 stream)...');
+        
+        // El endpoint /v1/sound-generation sirve perfectamente para música e instrumentales cortos
+        const elRes = await fetch('https://api.elevenlabs.io/v1/sound-generation', {
+            method: 'POST',
+            headers: {
+                'xi-api-key': ELEVENLABS_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                text: musicPrompt,
+                duration_seconds: 22,
+                prompt_influence: 0.3
+            })
+        });
+
+        if (!elRes.ok) {
+            const errBody = await elRes.text();
+            console.error('   !! Error de ElevenLabs:', errBody);
+            return res.json({ success: false, error: 'ElevenLabs API falló', musicPrompt });
+        }
+
+        // Paso 3: Guardar el stream MP3 resultante de forma local
+        const audioDir = path.join(ROOT_PATH, 'dashboard/client/public/audio');
+        if (!fs.existsSync(audioDir)) {
+            fs.mkdirSync(audioDir, { recursive: true });
+        }
+        
+        // Usamos un nombre único por query usando timestamp
+        const timestamp = Date.now();
+        const fileName = `fondo_${timestamp}.mp3`;
+        const destPath = path.join(audioDir, fileName);
+        
+        const destStream = fs.createWriteStream(destPath);
+        elRes.body.pipe(destStream);
+
+        destStream.on('finish', () => {
+            console.log(`   ✅ Audio guardado en: ${destPath}`);
+            // Retornamos la ruta pública manejada por Vite/React
+            return res.json({ 
+                success: true, 
+                audioUrl: `/audio/${fileName}`, 
+                musicPrompt 
+            });
+        });
+
+        destStream.on('error', (err) => {
+            console.error('   !! Error guardando archivo:', err);
+            return res.json({ success: false, error: 'Fallo al guardar MP3' });
+        });
+
+    } catch (err) {
+        console.error('Error en /api/generate-music:', err);
+        return res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 app.listen(PORT, () => {
