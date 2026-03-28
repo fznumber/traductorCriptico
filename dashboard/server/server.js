@@ -324,7 +324,7 @@ app.post('/api/transcribe', async (req, res) => {
         formData.append('file', fileBlob, 'audio.webm'); 
         formData.append('model_id', 'scribe_v1');
 
-        const elRes = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+        const elRes = await globalThis.fetch('https://api.elevenlabs.io/v1/speech-to-text', {
             method: 'POST',
             headers: {
                 'xi-api-key': ELEVENLABS_API_KEY
