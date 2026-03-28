@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Terminal, Play, Loader, Music } from 'lucide-react';
+import { Terminal, Play, Loader, Music, Mic } from 'lucide-react';
 
 const getApiBase = () => {
   const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -24,6 +24,11 @@ function App() {
   const [isThinkingAudioLoading, setIsThinkingAudioLoading] = useState(false);
   const [thinkingAudioError, setThinkingAudioError] = useState<string | null>(null);
   const thinkingAudioRef = useRef<HTMLAudioElement>(null);
+
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const addLog = (msg: string) => setLog(prev => prev + msg + '\n');
 
@@ -162,6 +167,70 @@ function App() {
     }
   };
 
+  const toggleRecording = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType });
+          setIsTranscribing(true);
+          
+          stream.getTracks().forEach(track => track.stop());
+
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = async () => {
+            const base64data = reader.result?.toString().split(',')[1];
+            if (!base64data) {
+              setIsTranscribing(false);
+              return;
+            }
+
+            try {
+              const res = await fetch(`${API_BASE}/transcribe`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  audioBase64: base64data, 
+                  mimeType: mediaRecorder.mimeType 
+                })
+              });
+              const data = await res.json();
+              if (data.success && data.text) {
+                setPrompt(data.text);
+              } else {
+                addLog('>> ⚠️ Error al transcribir: ' + (data.error || 'Desconocido'));
+              }
+            } catch (err: any) {
+              addLog('>> ⚠️ Error de conexión STT: ' + err.message);
+            } finally {
+              setIsTranscribing(false);
+            }
+          };
+        };
+
+        mediaRecorder.start();
+        setIsRecording(true);
+      } catch (err) {
+        console.error('Error de micrófono:', err);
+        addLog('>> ⚠️ Error al acceder al micrófono. Da permisos e intenta de nuevo.');
+      }
+    }
+  };
+
   const isRunning = status === 'generating' || status === 'processing';
 
   return (
@@ -185,9 +254,17 @@ function App() {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !isRunning && runPipeline()}
-            disabled={isRunning}
+            disabled={isRunning || isRecording || isTranscribing}
           />
-          <button onClick={runPipeline} disabled={isRunning}>
+          <button 
+            className={`mic-btn ${isRecording ? 'recording' : ''}`}
+            onClick={toggleRecording}
+            disabled={isRunning || isTranscribing}
+            title="Dictar consulta con tu voz"
+          >
+            {isTranscribing ? <Loader className="spin" size={16} /> : <Mic size={16} />}
+          </button>
+          <button onClick={runPipeline} disabled={isRunning || isRecording || isTranscribing}>
             <Play size={16} /> ANALIZAR
           </button>
         </div>
@@ -276,8 +353,11 @@ function App() {
         .input-panel { display: flex; gap: 10px; margin-bottom: 14px; flex-shrink: 0; }
         input { flex: 1; background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 12px 15px; font-family: inherit; font-size: 15px; outline: none; }
         input:focus { border-color: var(--accent); }
-        button { background: var(--accent); color: black; border: none; padding: 0 25px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; font-family: inherit; }
+        button { background: var(--accent); color: black; border: none; padding: 0 25px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; font-family: inherit; transition: 0.2s; }
         button:disabled { background: var(--dim); cursor: not-allowed; }
+        .mic-btn { background: #1a1a1a; color: var(--text); border: 1px solid var(--border); padding: 0 15px; }
+        .mic-btn:hover:not(:disabled) { background: #333; }
+        .mic-btn.recording { background: #f87171; color: white; border-color: #f87171; animation: pulse 1.5s infinite; }
 
         /* ── Music Bar ── */
         .music-bar {

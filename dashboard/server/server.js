@@ -16,7 +16,7 @@ app.use(cors({
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'anthropic-version']
 }));
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '50mb' }));
 
 const ROOT_PATH = path.resolve(__dirname, '../../');
 const WORKSPACES = ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'];
@@ -300,6 +300,51 @@ app.post('/api/speak-thinking', async (req, res) => {
 
     } catch (err) {
         console.error('Error en /api/speak-thinking:', err);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 6. Dictado por voz / Speech-to-Text (ElevenLabs API)
+app.post('/api/transcribe', async (req, res) => {
+    const { audioBase64, mimeType } = req.body;
+    if (!audioBase64) return res.status(400).json({ success: false, error: 'audioBase64 requerido' });
+
+    const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+    if (!ELEVENLABS_API_KEY || ELEVENLABS_API_KEY.includes('tu_')) {
+        return res.json({ success: false, error: 'Falta configurar ELEVENLABS_API_KEY en .env' });
+    }
+
+    console.log(`\n🎙️ Procesando audio STT de usuario (mimeType: ${mimeType || 'audio/webm'})...`);
+
+    try {
+        const buffer = Buffer.from(audioBase64, 'base64');
+        const fileBlob = new Blob([buffer], { type: mimeType || 'audio/webm' });
+        
+        const formData = new FormData();
+        formData.append('file', fileBlob, 'audio.webm'); 
+        formData.append('model_id', 'scribe_v1');
+
+        const elRes = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+            method: 'POST',
+            headers: {
+                'xi-api-key': ELEVENLABS_API_KEY
+            },
+            body: formData
+        });
+
+        if (!elRes.ok) {
+            const errBody = await elRes.text();
+            console.error('   !! Error STT ElevenLabs:', errBody);
+            return res.json({ success: false, error: 'ElevenLabs STT falló' });
+        }
+
+        const data = await elRes.json();
+        const transcription = data.text;
+
+        console.log(`   ✅ Audio transcrito con éxito: "${transcription}"`);
+        return res.json({ success: true, text: transcription });
+    } catch (err) {
+        console.error('Error en /api/transcribe:', err);
         return res.status(500).json({ success: false, error: err.message });
     }
 });
