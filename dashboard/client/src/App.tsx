@@ -20,6 +20,11 @@ function App() {
   const [musicStatus, setMusicStatus] = useState<'idle' | 'generating' | 'ready' | 'error'>('idle');
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  const [thinkingAudioUrl, setThinkingAudioUrl] = useState<string | null>(null);
+  const [isThinkingAudioLoading, setIsThinkingAudioLoading] = useState(false);
+  const [thinkingAudioError, setThinkingAudioError] = useState<string | null>(null);
+  const thinkingAudioRef = useRef<HTMLAudioElement>(null);
+
   const addLog = (msg: string) => setLog(prev => prev + msg + '\n');
 
   const runPipeline = async () => {
@@ -30,6 +35,8 @@ function App() {
     setMusicUrl(null);
     setMusicPrompt(null);
     setMusicStatus('generating');
+    setThinkingAudioUrl(null);
+    setThinkingAudioError(null);
     setLog(`>> Iniciando proceso crítico para: "${prompt}"\n`);
     setResults({ thinking: 'Generando...' });
     setActiveTab('thinking');
@@ -126,6 +133,35 @@ function App() {
     }
   };
 
+  const handleSpeakThinking = async () => {
+    if (!results.thinking) return;
+    setIsThinkingAudioLoading(true);
+    setThinkingAudioError(null);
+    setThinkingAudioUrl(null);
+    try {
+      const res = await fetch(`${API_BASE}/speak-thinking`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: results.thinking })
+      });
+      const data = await res.json();
+      if (data.success && data.audioUrl) {
+        setThinkingAudioUrl(data.audioUrl);
+        setTimeout(() => {
+          if (thinkingAudioRef.current) {
+            thinkingAudioRef.current.play().catch(() => {});
+          }
+        }, 300);
+      } else {
+        setThinkingAudioError(data.error || 'Error al generar voz');
+      }
+    } catch (err: any) {
+      setThinkingAudioError(err.message);
+    } finally {
+      setIsThinkingAudioLoading(false);
+    }
+  };
+
   const isRunning = status === 'generating' || status === 'processing';
 
   return (
@@ -204,6 +240,23 @@ function App() {
               ))}
             </div>
             <div className="content-viewer">
+              {activeTab === 'thinking' && results.thinking && results.thinking !== 'Generando...' && (
+                <div className="thinking-audio-bar">
+                  <button 
+                    onClick={handleSpeakThinking} 
+                    disabled={isThinkingAudioLoading}
+                    className="speak-btn"
+                  >
+                    {isThinkingAudioLoading ? <><Loader className="spin" size={12} /> Procesando...</> : <>🔈 Escuchar Thinking</>}
+                  </button>
+                  {thinkingAudioError && <span className="error-text">{thinkingAudioError}</span>}
+                  {thinkingAudioUrl && (
+                    <audio ref={thinkingAudioRef} controls className="thinking-player">
+                      <source src={thinkingAudioUrl} type="audio/mpeg" />
+                    </audio>
+                  )}
+                </div>
+              )}
               <pre style={{ color: activeTab === 'thinking' ? '#81d4fa' : '#ccc' }}>
                 {results[activeTab] || 'No hay datos de análisis disponibles para esta fase.'}
               </pre>
@@ -256,7 +309,12 @@ function App() {
         .tabs { display: flex; border-bottom: 1px solid var(--border); background: #0d0d0d; flex-shrink: 0; }
         .tabs button { flex: 1; background: transparent; color: var(--dim); border: none; border-right: 1px solid var(--border); padding: 12px; font-size: 10px; font-weight: bold; cursor: pointer; }
         .tabs button.active { color: var(--accent); background: var(--panel); }
-        .content-viewer pre { color: #ccc; }
+        .content-viewer pre { color: #ccc; flex: 1; }
+        .thinking-audio-bar { display: flex; align-items: center; gap: 15px; padding: 10px 20px; background: #0d0d0d; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+        .speak-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #374151; padding: 6px 12px; font-size: 11px; border-radius: 4px; }
+        .speak-btn:hover:not(:disabled) { background: #374151; }
+        .error-text { color: #f87171; font-size: 11px; }
+        .thinking-player { height: 25px; filter: invert(0.85) hue-rotate(200deg); }
         .spin { animation: spin 1.5s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>

@@ -225,6 +225,85 @@ Enunciado: "${query}"`
     }
 });
 
+// 5. Convertir texto a voz (Thinking) con ElevenLabs API
+app.post('/api/speak-thinking', async (req, res) => {
+    const { text, voiceId } = req.body;
+    if (!text) return res.status(400).json({ success: false, error: 'text requerido' });
+
+    const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+    if (!ELEVENLABS_API_KEY || ELEVENLABS_API_KEY.includes('tu_')) {
+        return res.json({ success: false, error: 'Falta configurar ELEVENLABS_API_KEY en .env' });
+    }
+
+    // Limpiar: Eliminar los tags <think> y su cierre, manteniendo el contenido interior.
+    // También limpiamos posibles saltos de línea extra fuertes.
+    let cleanText = text.replace(/<\/?think>/gi, '').trim();
+
+    // ElevenLabs tiene un límite de 5000 caracteres por request en su API de TTS estándar.
+    if (cleanText.length > 4900) {
+        cleanText = cleanText.substring(0, 4900) + '...';
+    }
+
+    // Voz por defecto: Adam (voz profunda/masculina)
+    const selectedVoiceId = voiceId || 'pNInz6obpgDQGcFmaJgB'; 
+
+    console.log(`\n🗣️ Iniciando Text-to-Speech (ElevenLabs) para thinking (${cleanText.length} caracteres). Voice ID: ${selectedVoiceId}`);
+
+    try {
+        const elRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
+            method: 'POST',
+            headers: {
+                'xi-api-key': ELEVENLABS_API_KEY,
+                'Content-Type': 'application/json',
+                Accept: 'audio/mpeg'
+            },
+            body: JSON.stringify({
+                text: cleanText,
+                model_id: "eleven_multilingual_v2",
+                voice_settings: {
+                    stability: 0.5,
+                    similarity_boost: 0.75
+                }
+            })
+        });
+
+        if (!elRes.ok) {
+            const errBody = await elRes.text();
+            console.error('   !! Error de ElevenLabs:', errBody);
+            return res.json({ success: false, error: 'ElevenLabs API falló' });
+        }
+
+        const audioDir = path.join(ROOT_PATH, 'dashboard/client/public/audio');
+        if (!fs.existsSync(audioDir)) {
+            fs.mkdirSync(audioDir, { recursive: true });
+        }
+        
+        const timestamp = Date.now();
+        const fileName = `thinking_${timestamp}.mp3`;
+        const destPath = path.join(audioDir, fileName);
+        
+        const destStream = fs.createWriteStream(destPath);
+        elRes.body.pipe(destStream);
+
+        destStream.on('finish', () => {
+            console.log(`   ✅ Audio guardado en: ${destPath}`);
+            return res.json({ 
+                success: true, 
+                audioUrl: `/audio/${fileName}`
+            });
+        });
+
+        destStream.on('error', (err) => {
+            console.error('   !! Error guardando archivo thinking:', err);
+            return res.json({ success: false, error: 'Fallo al guardar MP3' });
+        });
+
+    } catch (err) {
+        console.error('Error en /api/speak-thinking:', err);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`\n🦞 TC2026 Dashboard Server running on http://localhost:${PORT}`);
     console.log(`Root Path: ${ROOT_PATH}\n`);
