@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Terminal, Play, Loader, Music, Mic } from 'lucide-react';
 
 const getApiBase = () => {
@@ -20,6 +20,23 @@ function App() {
   const [musicStatus, setMusicStatus] = useState<'idle' | 'generating' | 'ready' | 'error'>('idle');
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  // --- Audio Settings State ---
+  const [showAudioSettings, setShowAudioSettings] = useState(false);
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  
+  const [musicDeviceId, setMusicDeviceId] = useState<string>('default');
+  const [musicPan, setMusicPan] = useState(0);
+  const [musicVolume, setMusicVolume] = useState(1);
+  
+  const [effectsDeviceId, setEffectsDeviceId] = useState<string>('default');
+  const [effectsPan, setEffectsPan] = useState(0);
+  const [effectsVolume, setEffectsVolume] = useState(1);
+
+  const musicCtxRef = useRef<AudioContext | null>(null);
+  const musicPannerRef = useRef<StereoPannerNode | null>(null);
+  const effectsCtxRef = useRef<AudioContext | null>(null);
+  const effectsPannerRef = useRef<StereoPannerNode | null>(null);
+
   const [thinkingAudioUrl, setThinkingAudioUrl] = useState<string | null>(null);
   const [isThinkingAudioLoading, setIsThinkingAudioLoading] = useState(false);
   const [thinkingAudioError, setThinkingAudioError] = useState<string | null>(null);
@@ -31,6 +48,91 @@ function App() {
   const audioChunksRef = useRef<Blob[]>([]);
 
   const addLog = (msg: string) => setLog(prev => prev + msg + '\n');
+
+  // --- Audio Enumerate Devices ---
+  const fetchAudioDevices = async () => {
+    try {
+      if (!navigator.mediaDevices) return;
+      // Pedimos permiso de mic para asegurar que se muestren los labels de los dispositivos
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(t => t.stop());
+      } catch (e) {
+        // Ignoramos si deniega permiso, solo leemos los dispositivos disponibles
+      }
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices.filter(d => d.kind === 'audiooutput');
+      setAudioDevices(outputs);
+    } catch (err) {
+      console.error('Error enumerando dispositivos de audio:', err);
+    }
+  };
+
+  // --- Funciones para enlazar Web Audio y Aplicar Settings ---
+  const applyAudioSettings = (
+    audioElement: HTMLAudioElement,
+    ctxRef: React.MutableRefObject<AudioContext | null>,
+    pannerRef: React.MutableRefObject<StereoPannerNode | null>,
+    deviceId: string,
+    pan: number,
+    volume: number
+  ) => {
+    if (!audioElement) return;
+    
+    // Config volumen nativo siempre
+    audioElement.volume = volume;
+
+    try {
+      const Ctx = (window.AudioContext || (window as any).webkitAudioContext) as typeof AudioContext;
+      if (!Ctx) {
+        // Fallback: solo setSinkId en HTMLAudioElement si WebAudio no está
+        if ('setSinkId' in audioElement) {
+          (audioElement as any).setSinkId(deviceId).catch((e:any) => console.log('Sink Error', e));
+        }
+        return;
+      }
+
+      // Inicializar una sola vez
+      if (!ctxRef.current) {
+        ctxRef.current = new Ctx();
+        const source = ctxRef.current.createMediaElementSource(audioElement);
+        pannerRef.current = ctxRef.current.createStereoPanner();
+        source.connect(pannerRef.current);
+        pannerRef.current.connect(ctxRef.current.destination);
+      }
+
+      // Aplicar pan
+      if (pannerRef.current) {
+        pannerRef.current.pan.value = pan;
+      }
+
+      // Aplicar Sink (Dispositivo) en AudioContext si el navegador lo soporta (Chrome 110+)
+      if ('setSinkId' in ctxRef.current) {
+        (ctxRef.current as any).setSinkId(deviceId).catch((e:any) => console.log('Ctx Sink Error', e));
+      } else if ('setSinkId' in audioElement) {
+        // Fallback a HTMLAudioElement
+        (audioElement as any).setSinkId(deviceId).catch((e:any) => console.log('Audio Sink Error', e));
+      }
+    } catch (e) {
+      // Si la fuente ya estaba conectada u otro error, aplicamos fallback seguro
+      if ('setSinkId' in audioElement) {
+        (audioElement as any).setSinkId(deviceId).catch(() => {});
+      }
+    }
+  };
+
+  // Re-aplicar configuraciones cuando cambian
+  useEffect(() => {
+    if (audioRef.current) {
+      applyAudioSettings(audioRef.current, musicCtxRef, musicPannerRef, musicDeviceId, musicPan, musicVolume);
+    }
+  }, [musicUrl, musicDeviceId, musicPan, musicVolume]);
+
+  useEffect(() => {
+    if (thinkingAudioRef.current) {
+      applyAudioSettings(thinkingAudioRef.current, effectsCtxRef, effectsPannerRef, effectsDeviceId, effectsPan, effectsVolume);
+    }
+  }, [thinkingAudioUrl, effectsDeviceId, effectsPan, effectsVolume]);
 
   const runPipeline = async () => {
     if (!prompt) return;
@@ -240,13 +342,65 @@ function App() {
           <Terminal size={24} />
           <h1 style={{ fontSize: '18px', margin: 0 }}>TC2026 / TRADUCTOR CRÍTICO</h1>
         </div>
-        <div className="status-badge">
-          {isRunning && <Loader className="spin" size={14} />}
-          {status.toUpperCase()}
+        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+          <button 
+            className="config-btn"
+            onClick={() => {
+              if (!showAudioSettings) fetchAudioDevices();
+              setShowAudioSettings(!showAudioSettings);
+            }}
+            title="Configuración de Canales de Audio"
+          >
+             ⚙️ Audio
+          </button>
+          <div className="status-badge">
+            {isRunning && <Loader className="spin" size={14} />}
+            {status.toUpperCase()}
+          </div>
         </div>
       </header>
 
       <main>
+        {/* PANEL DE CONFIGURACIÓN DE AUDIO */}
+        {showAudioSettings && (
+          <div className="audio-settings-panel">
+            <div className="settings-section">
+              <h4>Canal: MÚSICA DE FONDO</h4>
+              <label>Salida: 
+                <select value={musicDeviceId} onChange={e => setMusicDeviceId(e.target.value)}>
+                  <option value="default">Por Defecto</option>
+                  {audioDevices.map(d => <option key={`m-${d.deviceId}`} value={d.deviceId}>{d.label || 'Dispositivo ' + d.deviceId.slice(0,5)}</option>)}
+                </select>
+              </label>
+              <label className="slider-label">Paneo L/R:
+                <input type="range" min="-1" max="1" step="0.1" value={musicPan} onChange={e => setMusicPan(parseFloat(e.target.value))} />
+                <span>{musicPan}</span>
+              </label>
+              <label className="slider-label">Volumen:
+                <input type="range" min="0" max="1" step="0.1" value={musicVolume} onChange={e => setMusicVolume(parseFloat(e.target.value))} />
+                <span>{musicVolume}</span>
+              </label>
+            </div>
+            <div className="settings-section effects-section">
+              <h4>Canal: EFECTOS Y VOZ</h4>
+              <label>Salida: 
+                <select value={effectsDeviceId} onChange={e => setEffectsDeviceId(e.target.value)}>
+                  <option value="default">Por Defecto</option>
+                  {audioDevices.map(d => <option key={`e-${d.deviceId}`} value={d.deviceId}>{d.label || 'Dispositivo ' + d.deviceId.slice(0,5)}</option>)}
+                </select>
+              </label>
+              <label className="slider-label">Paneo L/R:
+                <input type="range" min="-1" max="1" step="0.1" value={effectsPan} onChange={e => setEffectsPan(parseFloat(e.target.value))} />
+                <span>{effectsPan}</span>
+              </label>
+              <label className="slider-label">Volumen:
+                <input type="range" min="0" max="1" step="0.1" value={effectsVolume} onChange={e => setEffectsVolume(parseFloat(e.target.value))} />
+                <span>{effectsVolume}</span>
+              </label>
+            </div>
+          </div>
+        )}
+
         <div className="input-panel">
           <input
             type="text"
@@ -291,7 +445,7 @@ function App() {
               )}
             </div>
             {musicStatus === 'ready' && musicUrl && (
-              <audio ref={audioRef} controls loop className="audio-player">
+              <audio ref={audioRef} controls loop className="audio-player" crossOrigin="anonymous">
                 <source src={musicUrl} type="audio/mpeg" />
               </audio>
             )}
@@ -328,7 +482,7 @@ function App() {
                   </button>
                   {thinkingAudioError && <span className="error-text">{thinkingAudioError}</span>}
                   {thinkingAudioUrl && (
-                    <audio ref={thinkingAudioRef} controls className="thinking-player">
+                    <audio ref={thinkingAudioRef} controls className="thinking-player" crossOrigin="anonymous">
                       <source src={thinkingAudioUrl} type="audio/mpeg" />
                     </audio>
                   )}
@@ -349,7 +503,21 @@ function App() {
         header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 15px; margin-bottom: 16px; flex-shrink: 0; }
         main { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
         .logo { display: flex; align-items: center; gap: 12px; color: var(--accent); }
+        .config-btn { background: #1a1a1a; color: var(--dim); border: 1px solid var(--border); padding: 4px 10px; font-size: 11px; }
+        .config-btn:hover { background: #333; color: white; }
         .status-badge { font-size: 11px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 2px; display: flex; align-items: center; gap: 6px; color: var(--dim); }
+        
+        /* Audio Settings Panel */
+        .audio-settings-panel { display: flex; gap: 20px; background: #111; border: 1px solid var(--music); border-radius: 4px; padding: 15px; margin-bottom: 15px; flex-shrink: 0; }
+        .settings-section { flex: 1; display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+        .settings-section h4 { margin: 0 0 10px 0; color: var(--music); font-size: 11px; letter-spacing: 1px; }
+        .settings-section.effects-section h4 { color: #60a5fa; }
+        .settings-section label { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .settings-section select { background: #222; color: #eee; border: 1px solid #444; padding: 4px; font-family: inherit; font-size: 11px; width: 140px; }
+        .slider-label { display: flex; width: 100%; align-items: center; justify-content: space-between; }
+        .slider-label input[type=range] { flex: 1; margin: 0 10px; height: 4px; accent-color: var(--music); }
+        .slider-label span { width: 30px; text-align: right; color: var(--dim); }
+
         .input-panel { display: flex; gap: 10px; margin-bottom: 14px; flex-shrink: 0; }
         input { flex: 1; background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 12px 15px; font-family: inherit; font-size: 15px; outline: none; }
         input:focus { border-color: var(--accent); }
