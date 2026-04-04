@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Terminal, Play, Loader, Music, Mic } from 'lucide-react';
+import KnowledgeGraph from './KnowledgeGraph';
 
 const getApiBase = () => {
   const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -15,6 +16,7 @@ function App() {
   const [log, setLog] = useState('');
   const [results, setResults] = useState<any>({});
   const [activeTab, setActiveTab] = useState('thinking');
+  const [grafoUrl, setGrafoUrl] = useState<string | null>(null);
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [musicPrompt, setMusicPrompt] = useState<string | null>(null);
   const [musicStatus, setMusicStatus] = useState<'idle' | 'generating' | 'ready' | 'error'>('idle');
@@ -224,6 +226,13 @@ function App() {
                 ? '>> El análisis ha terminado, pero algunos agentes reportaron errores.'
                 : '>> ✅ Todos los agentes han finalizado el análisis correctamente.'
               );
+              
+              // Cargar el grafo de conocimiento
+              const grafoRes = await fetch(`${API_BASE}/grafo`);
+              if (grafoRes.ok) {
+                setGrafoUrl(`${API_BASE}/grafo`);
+                addLog('>> 🕸️  Grafo de conocimiento generado y disponible.');
+              }
             }
           } catch (e) {
             console.error('Error polling:', e);
@@ -460,37 +469,50 @@ function App() {
 
           <section className="results">
             <div className="tabs">
-              {['thinking', 'ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'].map(tab => (
+              {['thinking', 'ausencias', 'bifurcaciones', 'grounding', 'neutralizacion', 'grafo'].map(tab => (
                 <button
                   key={tab}
                   className={activeTab === tab ? 'active' : ''}
                   onClick={() => setActiveTab(tab)}
+                  disabled={tab === 'grafo' && !grafoUrl}
                 >
                   {tab.toUpperCase()}
                 </button>
               ))}
             </div>
             <div className="content-viewer">
-              {activeTab === 'thinking' && results.thinking && results.thinking !== 'Generando...' && (
-                <div className="thinking-audio-bar">
-                  <button 
-                    onClick={handleSpeakThinking} 
-                    disabled={isThinkingAudioLoading}
-                    className="speak-btn"
-                  >
-                    {isThinkingAudioLoading ? <><Loader className="spin" size={12} /> Procesando...</> : <>🔈 Escuchar Thinking</>}
-                  </button>
-                  {thinkingAudioError && <span className="error-text">{thinkingAudioError}</span>}
-                  {thinkingAudioUrl && (
-                    <audio ref={thinkingAudioRef} controls className="thinking-player" crossOrigin="anonymous">
-                      <source src={thinkingAudioUrl} type="audio/mpeg" />
-                    </audio>
+              {activeTab === 'grafo' ? (
+                grafoUrl ? (
+                  <KnowledgeGraph grafoUrl={grafoUrl} />
+                ) : (
+                  <pre style={{ color: '#666' }}>
+                    El grafo de conocimiento se generará al completar el análisis de los 4 agentes.
+                  </pre>
+                )
+              ) : (
+                <>
+                  {activeTab === 'thinking' && results.thinking && results.thinking !== 'Generando...' && (
+                    <div className="thinking-audio-bar">
+                      <button 
+                        onClick={handleSpeakThinking} 
+                        disabled={isThinkingAudioLoading}
+                        className="speak-btn"
+                      >
+                        {isThinkingAudioLoading ? <><Loader className="spin" size={12} /> Procesando...</> : <>🔈 Escuchar Thinking</>}
+                      </button>
+                      {thinkingAudioError && <span className="error-text">{thinkingAudioError}</span>}
+                      {thinkingAudioUrl && (
+                        <audio ref={thinkingAudioRef} controls className="thinking-player" crossOrigin="anonymous">
+                          <source src={thinkingAudioUrl} type="audio/mpeg" />
+                        </audio>
+                      )}
+                    </div>
                   )}
-                </div>
+                  <pre style={{ color: activeTab === 'thinking' ? '#81d4fa' : '#ccc' }}>
+                    {results[activeTab] || 'No hay datos de análisis disponibles para esta fase.'}
+                  </pre>
+                </>
               )}
-              <pre style={{ color: activeTab === 'thinking' ? '#81d4fa' : '#ccc' }}>
-                {results[activeTab] || 'No hay datos de análisis disponibles para esta fase.'}
-              </pre>
             </div>
           </section>
         </div>

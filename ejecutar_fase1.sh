@@ -111,4 +111,12 @@ ejecutar_agente "NEUTRALIZACIÓN" "workspaces/neutralizacion"
 ejecutar_agente "AUSENCIAS" "workspaces/ausencias"
 
 echo "-------------------------------------------------------"
-echo "Proceso finalizado. Verifica los archivos RESULTADO_FASE1.md"
+echo "Extrayendo y consolidando JSON de grafos robustamente..."
+
+# Usar el nuevo script de Node.js para la consolidación
+node consolidar_grafo.js
+
+echo "-------------------------------------------------------"
+echo "Proceso finalizado. Verifica:"
+echo "  - Análisis individuales: workspaces/*/RESULTADO_FASE1.md"
+echo "  - Grafo consolidado: grafo.json"

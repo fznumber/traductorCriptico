@@ -125,7 +125,25 @@ app.get('/api/results', (req, res) => {
     res.json(results);
 });
 
-// 4. Generar Música de Fondo con ElevenLabs API
+// 4. Servir el grafo de conocimiento consolidado
+app.get('/api/grafo', (req, res) => {
+    const grafoPath = path.join(ROOT_PATH, 'grafo.json');
+    if (fs.existsSync(grafoPath)) {
+        try {
+            const content = fs.readFileSync(grafoPath, 'utf-8');
+            if (!content || content.trim() === '') {
+                return res.json({ metadata: { error: 'Grafo vacío' }, entidades: [], relaciones: [] });
+            }
+            res.json(JSON.parse(content));
+        } catch (e) {
+            res.status(500).json({ error: 'Error al leer el grafo', details: e.message });
+        }
+    } else {
+        res.json({ metadata: { status: 'esperando_datos' }, entidades: [], relaciones: [] });
+    }
+});
+
+// 5. Generar Música de Fondo con ElevenLabs API
 app.post('/api/generate-music', async (req, res) => {
     const { query } = req.body;
     if (!query) return res.status(400).json({ success: false, error: 'query requerida' });
