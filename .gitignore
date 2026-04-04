@@ -19,6 +19,15 @@ env/
 Thumbs.db
 
 # Project specific
-# (Mantenemos thinking.txt y RESULTADO_FASE1.md ya que son parte del flujo del repo en este caso,
-# pero si prefieres ignorarlos, avísame)
-# workspaces/*/.openclaw/
+grafo.json
+thinking.txt
+workspaces/*/RESULTADO_FASE1.md
+dashboard/client/public/audio/fondo_*.mp3
+dashboard/client/public/audio/thinking_*.mp3
+
+# Tools & Local Config
+.gemini/
+.playwright-mcp/
+.vscode/
+.claude/
+.kiro/
