@@ -64,7 +64,7 @@ Integrar visualización de grafos de conocimiento al proyecto TC2026 para mostra
   "metadata": {
     "timestamp": "ISO-8601",
     "modelo": "nombre-del-modelo",
-    "provider": "anthropic|ollama"
+    "provider": "anthropic|ollama|nvidia"
   },
   "entidades": [
     {

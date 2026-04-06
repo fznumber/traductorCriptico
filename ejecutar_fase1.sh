@@ -22,8 +22,12 @@ PROVIDER=${LLM_PROVIDER:-anthropic}
 
 if [ "$PROVIDER" == "anthropic" ]; then
     MODELO_ACTUAL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+elif [ "$PROVIDER" == "nvidia" ]; then
+    MODELO_ACTUAL=${NVIDIA_MODEL:-deepseek-ai/deepseek-v3.2}
+    NVIDIA_URL="${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}/chat/completions"
 else
     MODELO_ACTUAL=${OLLAMA_MODEL:-qwen3.5:4b}
+    OLLAMA_URL_FINAL=${OLLAMA_URL:-http://127.0.0.1:11434/v1/chat/completions}
 fi
 
 echo "Iniciando análisis de Fase 1 (Mandato de Idioma: ESPAÑOL)..."
@@ -70,9 +74,23 @@ ejecutar_agente() {
                     \"messages\": [{\"role\": \"user\", \"content\": $(echo "$prompt_final" | jq -Rs .)}]
                 }")
             content=$(echo "$response" | jq -r '.content[0].text // ""')
+        elif [ "$PROVIDER" == "nvidia" ]; then
+            response=$(curl -s -X POST "$NVIDIA_URL" \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer $NVIDIA_API_KEY" \
+                -d "$(jq -n \
+                    --arg model "$MODELO_ACTUAL" \
+                    --arg content "$prompt_final" \
+                    '{
+                        model: $model,
+                        messages: [{role: "user", content: $content}],
+                        stream: false,
+                        chat_template_kwargs: {thinking: true}
+                    }')")
+            content=$(echo "$response" | jq -r '.choices[0].message.content // ""')
         else
             # Fallback a Ollama si el proveedor es local
-            response=$(curl -s -X POST ${OLLAMA_URL:-http://127.0.0.1:11434/v1/chat/completions} \
+            response=$(curl -s -X POST "$OLLAMA_URL_FINAL" \
                 -H "Content-Type: application/json" \
                 -H "Authorization: Bearer $OLLAMA_API_KEY" \
                 -d "{

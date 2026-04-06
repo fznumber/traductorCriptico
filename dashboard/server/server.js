@@ -24,12 +24,27 @@ const WORKSPACES = ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion']
 // Configuración de proveedores
 const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
 
-// 1. Generar Thinking Inicial — SIEMPRE usa Ollama (único modelo que expone chain-of-thought)
+// 1. Generar Thinking Inicial — Soporta Ollama o NVIDIA
 app.post('/api/generate-thinking', async (req, res) => {
     const { prompt } = req.body;
-    const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
-    const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3.5:4b';
-    console.log(`>> Iniciando generación de thinking con Ollama (${OLLAMA_MODEL})...`);
+    const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
+    
+    let url, model, headers;
+    
+    if (PROVIDER === 'nvidia') {
+        url = process.env.NVIDIA_BASE_URL + '/chat/completions';
+        model = process.env.NVIDIA_MODEL || 'deepseek-ai/deepseek-v3.2';
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.NVIDIA_API_KEY}`
+        };
+        console.log(`>> Iniciando generación de thinking con NVIDIA (${model})...`);
+    } else {
+        url = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
+        model = process.env.OLLAMA_MODEL || 'qwen3.5:4b';
+        headers = { 'Content-Type': 'application/json' };
+        console.log(`>> Iniciando generación de thinking con Ollama (${model})...`);
+    }
 
     // Borrar el thinking anterior para que el cliente sepa que está generando uno nuevo
     const thinkingPath = path.join(ROOT_PATH, 'thinking.txt');
@@ -38,19 +53,26 @@ app.post('/api/generate-thinking', async (req, res) => {
     }
 
     // Respondemos de inmediato
-    res.json({ success: true, message: 'Generación de thinking iniciada LOCALMENTE' });
+    res.json({ success: true, message: `Generación de thinking iniciada con ${PROVIDER.toUpperCase()}` });
 
-    // Proceso en segundo plano — siempre Ollama
+    // Proceso en segundo plano
     (async () => {
         try {
-            const response = await fetch(OLLAMA_URL, {
+            const body = {
+                model: model,
+                messages: [{ role: 'user', content: prompt }],
+                stream: false
+            };
+
+            // Parámetro específico para NVIDIA DeepSeek thinking
+            if (PROVIDER === 'nvidia') {
+                body.chat_template_kwargs = { thinking: true };
+            }
+
+            const response = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: OLLAMA_MODEL,
-                    messages: [{ role: 'user', content: prompt }],
-                    stream: false
-                })
+                headers: headers,
+                body: JSON.stringify(body)
             });
             const data = await response.json();
 
@@ -58,6 +80,7 @@ app.post('/api/generate-thinking', async (req, res) => {
             let thinking = '';
             if (message) {
                 const content = message.content || '';
+                // Algunos modelos (como DeepSeek-R1) exponen reasoning_content
                 const reasoning = message.reasoning_content || message.reasoning || '';
                 thinking = reasoning
                     ? `<think>\n${reasoning}\n</think>\n\n${content}`
@@ -66,9 +89,9 @@ app.post('/api/generate-thinking', async (req, res) => {
 
             if (thinking) {
                 fs.writeFileSync(thinkingPath, String(thinking));
-                console.log(`>> Thinking generado con Ollama (${OLLAMA_MODEL}) y guardado.`);
+                console.log(`>> Thinking generado con ${PROVIDER.toUpperCase()} (${model}) y guardado.`);
             } else {
-                console.error('>> Error: Ollama no retornó contenido.', data);
+                console.error(`>> Error: ${PROVIDER.toUpperCase()} no retornó contenido.`, data);
             }
         } catch (error) {
             console.error('Error generando thinking en segundo plano:', error);

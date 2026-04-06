@@ -6,10 +6,12 @@ Este documento detalla el funcionamiento técnico y conceptual del proyecto **TC
 
 ## 1. El Stack Tecnológico
 
-El proyecto se apoya en una infraestructura local robusta para garantizar privacidad, soberanía técnica y capacidad de procesamiento intensivo:
+El proyecto se apoya en una infraestructura flexible que combina procesamiento local y APIs de alto rendimiento:
 
-*   **Motor de Inferencia Local:** [Ollama](https://ollama.com/)
-    *   **Modelo Principal de Análisis:** `qwen3.5:4b` (Modelo ligero con capacidades optimizadas).
+*   **Motores de Inferencia:** 
+    *   **Local:** [Ollama](https://ollama.com/) (Modelo `qwen3.5:4b`).
+    *   **Cloud Especializado:** [NVIDIA API / NIM](https://www.nvidia.com/en-us/ai-data-science/generative-ai/nim/) (Modelo `deepseek-ai/deepseek-r1`).
+    *   **Análisis Externo:** [Anthropic API](https://www.anthropic.com/) (Claude 3.5/4.5).
 *   **Orquestador de Agentes:** [OpenClaw](https://github.com/nethopper/openclaw)
     *   Utilizado para gestionar "Workspaces" independientes, cada uno con su propia identidad, memoria y configuración de modelo.
 *   **Entorno de Ejecución:** Bash / Linux (Scripts de automatización y gestión de archivos Markdown).
