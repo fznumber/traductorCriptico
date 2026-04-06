@@ -13,6 +13,7 @@ interface Entidad {
   omitido?: string;
   reemplazado_por?: string;
   pregunta_clausurada?: string;
+  comunidad?: number;
 }
 
 interface Relacion {
@@ -27,6 +28,7 @@ interface GrafoData {
     timestamp: string;
     modelo: string;
     provider: string;
+    comunidades_detectadas?: number;
   };
   entidades: Entidad[];
   relaciones: Relacion[];
@@ -41,14 +43,19 @@ const KnowledgeGraph = ({ grafoUrl }: KnowledgeGraphProps) => {
   const [selectedNode, setSelectedNode] = useState<Entidad | null>(null);
   const [grafoData, setGrafoData] = useState<GrafoData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [colorMode, setColorMode] = useState<'agente' | 'comunidad'>('agente');
 
   // Colores por agente
   const colorMap: Record<string, string> = {
     bifurcaciones: '#f59e0b',
     grounding: '#10b981',
     neutralizacion: '#ef4444',
-    ausencias: '#8b5cf6'
+    ausencias: '#8b5cf6',
+    sistema: '#3b82f6'
   };
+
+  // Escala de colores para comunidades (D3)
+  const communityColorScale = d3.scaleOrdinal(d3.schemeCategory10);
 
   useEffect(() => {
     const fetchGrafo = async () => {
@@ -86,7 +93,7 @@ const KnowledgeGraph = ({ grafoUrl }: KnowledgeGraphProps) => {
     const g = svg.append('g');
 
     const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.3, 3])
+      .scaleExtent([0.1, 5])
       .on('zoom', (event) => {
         g.attr('transform', event.transform);
       });
@@ -145,7 +152,13 @@ const KnowledgeGraph = ({ grafoUrl }: KnowledgeGraphProps) => {
       .data(nodes)
       .join('circle')
       .attr('r', (d: any) => d.certeza === 'alta' ? 12 : d.certeza === 'media' ? 10 : 8)
-      .attr('fill', (d: any) => colorMap[d.agente] || '#666')
+      .attr('fill', (d: any) => {
+        if (colorMode === 'agente') {
+          return colorMap[d.agente] || '#666';
+        } else {
+          return d.comunidad !== undefined ? communityColorScale(d.comunidad.toString()) : '#666';
+        }
+      })
       .attr('stroke', '#fff')
       .attr('stroke-width', 2)
       .attr('opacity', 0.9)
@@ -202,7 +215,7 @@ const KnowledgeGraph = ({ grafoUrl }: KnowledgeGraphProps) => {
     // Click en el fondo para deseleccionar
     svg.on('click', () => setSelectedNode(null));
 
-  }, [grafoData]);
+  }, [grafoData, colorMode]);
 
   if (error) {
     return (
@@ -242,6 +255,13 @@ const KnowledgeGraph = ({ grafoUrl }: KnowledgeGraphProps) => {
               <strong>Label:</strong>
               <p>{selectedNode.label}</p>
             </div>
+
+            {selectedNode.comunidad !== undefined && (
+              <div className="detail-field">
+                <strong>Clúster Louvain:</strong>
+                <p>Comunidad #{selectedNode.comunidad}</p>
+              </div>
+            )}
 
             {selectedNode.fragmento && (
               <div className="detail-field">
@@ -295,14 +315,47 @@ const KnowledgeGraph = ({ grafoUrl }: KnowledgeGraphProps) => {
         </div>
       )}
 
+      <div className="graph-controls">
+        <div className="control-title">MODO DE COLOR</div>
+        <div className="toggle-container">
+          <button 
+            className={`toggle-btn ${colorMode === 'agente' ? 'active' : ''}`}
+            onClick={() => setColorMode('agente')}
+          >
+            Agente
+          </button>
+          <button 
+            className={`toggle-btn ${colorMode === 'comunidad' ? 'active' : ''}`}
+            onClick={() => setColorMode('comunidad')}
+          >
+            Comunidad (Louvain)
+          </button>
+        </div>
+      </div>
+
       <div className="graph-legend">
-        <div className="legend-title">AGENTES</div>
-        {Object.entries(colorMap).map(([agente, color]) => (
-          <div key={agente} className="legend-item">
-            <div className="legend-color" style={{ background: color }} />
-            <span>{agente}</span>
-          </div>
-        ))}
+        {colorMode === 'agente' ? (
+          <>
+            <div className="legend-title">AGENTES</div>
+            {Object.entries(colorMap).map(([agente, color]) => (
+              <div key={agente} className="legend-item">
+                <div className="legend-color" style={{ background: color }} />
+                <span>{agente}</span>
+              </div>
+            ))}
+          </>
+        ) : (
+          <>
+            <div className="legend-title">COMUNIDADES</div>
+            <div className="legend-info">
+              {grafoData.metadata.comunidades_detectadas || '...'} grupos detectados
+            </div>
+            <p style={{ fontSize: '9px', color: '#666', marginTop: '5px' }}>
+              Los nodos del mismo color forman un clúster de sesgo detectado por Louvain.
+            </p>
+          </>
+        )}
+        
         <div className="legend-title" style={{ marginTop: '15px' }}>CERTEZA</div>
         <div className="legend-item">
           <div className="legend-line" style={{ borderStyle: 'solid' }} />
@@ -319,6 +372,60 @@ const KnowledgeGraph = ({ grafoUrl }: KnowledgeGraphProps) => {
       </div>
 
       <style>{`
+        .graph-controls {
+          position: absolute;
+          left: 20px;
+          bottom: 20px;
+          background: #141414;
+          border: 1px solid #333;
+          border-radius: 4px;
+          padding: 12px;
+          z-index: 10;
+        }
+
+        .control-title {
+          font-weight: bold;
+          font-size: 10px;
+          color: #999;
+          margin-bottom: 8px;
+          letter-spacing: 1px;
+          text-transform: uppercase;
+        }
+
+        .toggle-container {
+          display: flex;
+          gap: 5px;
+        }
+
+        .toggle-btn {
+          background: #222;
+          border: 1px solid #444;
+          color: #888;
+          padding: 5px 10px;
+          font-size: 10px;
+          cursor: pointer;
+          border-radius: 2px;
+          transition: all 0.2s;
+        }
+
+        .toggle-btn:hover {
+          background: #333;
+          color: #fff;
+        }
+
+        .toggle-btn.active {
+          background: #00ff41;
+          color: #000;
+          border-color: #00ff41;
+          font-weight: bold;
+        }
+
+        .legend-info {
+          font-size: 12px;
+          color: #00ff41;
+          margin-bottom: 5px;
+        }
+
         .node-detail-panel {
           position: absolute;
           right: 20px;
@@ -332,6 +439,7 @@ const KnowledgeGraph = ({ grafoUrl }: KnowledgeGraphProps) => {
           display: flex;
           flex-direction: column;
           box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+          z-index: 10;
         }
 
         .detail-header {
@@ -440,6 +548,7 @@ const KnowledgeGraph = ({ grafoUrl }: KnowledgeGraphProps) => {
           border-radius: 4px;
           padding: 12px;
           font-size: 11px;
+          z-index: 10;
         }
 
         .legend-title {

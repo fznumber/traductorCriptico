@@ -125,6 +125,8 @@ app.get('/api/results', (req, res) => {
     res.json(results);
 });
 
+const { applyClustering } = require('./clustering');
+
 // 4. Servir el grafo de conocimiento consolidado
 app.get('/api/grafo', (req, res) => {
     const grafoPath = path.join(ROOT_PATH, 'grafo.json');
@@ -134,7 +136,12 @@ app.get('/api/grafo', (req, res) => {
             if (!content || content.trim() === '') {
                 return res.json({ metadata: { error: 'Grafo vacío' }, entidades: [], relaciones: [] });
             }
-            res.json(JSON.parse(content));
+            
+            let data = JSON.parse(content);
+            // Aplicar clustering al vuelo
+            data = applyClustering(data);
+            
+            res.json(data);
         } catch (e) {
             res.status(500).json({ error: 'Error al leer el grafo', details: e.message });
         }
