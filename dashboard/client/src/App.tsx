@@ -22,8 +22,16 @@ function App() {
   const [musicStatus, setMusicStatus] = useState<'idle' | 'generating' | 'ready' | 'error'>('idle');
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  // --- Audio Settings State ---
-  const [showAudioSettings, setShowAudioSettings] = useState(false);
+  // --- Audio y Screen Settings State ---
+  const [showSettings, setShowSettings] = useState(false);
+  const [screens, setScreens] = useState<any[]>([]);
+  const [phaseScreens, setPhaseScreens] = useState({
+    ausencias: 'main',
+    bifurcaciones: 'main',
+    grounding: 'main',
+    neutralizacion: 'main'
+  });
+  const popupsRef = useRef<Record<string, Window | null>>({});
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   
   const [musicDeviceId, setMusicDeviceId] = useState<string>('default');
@@ -51,7 +59,20 @@ function App() {
 
   const addLog = (msg: string) => setLog(prev => prev + msg + '\n');
 
-  // --- Audio Enumerate Devices ---
+  // --- Screens Enumerate ---
+  const fetchScreens = async () => {
+    try {
+      if ('getScreenDetails' in window) {
+        const screenDetails = await (window as any).getScreenDetails();
+        setScreens(screenDetails.screens);
+      } else {
+        console.warn('Window Management API no soportada en este navegador.');
+      }
+    } catch (err) {
+      console.error('Error obteniendo pantallas:', err);
+    }
+  };
+
   const fetchAudioDevices = async () => {
     try {
       if (!navigator.mediaDevices) return;
@@ -69,6 +90,21 @@ function App() {
       console.error('Error enumerando dispositivos de audio:', err);
     }
   };
+
+  // Broadcast results updates to external screens
+  useEffect(() => {
+    Object.keys(popupsRef.current).forEach(phase => {
+      const win = popupsRef.current[phase];
+      if (win && !win.closed) {
+        const contentEl = win.document.getElementById('content');
+        if (contentEl) {
+          contentEl.textContent = results[phase] || 'Generando...';
+        }
+      } else {
+        popupsRef.current[phase] = null;
+      }
+    });
+  }, [results]);
 
   // --- Funciones para enlazar Web Audio y Aplicar Settings ---
   const applyAudioSettings = (
@@ -203,6 +239,27 @@ function App() {
       const startPhase1 = async () => {
         setStatus('processing');
         addLog('>> Orquestando 4 agentes en OpenClaw...');
+
+        // POPUPS MULTI-SCREEN
+        ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'].forEach(phase => {
+          const screenVal = (phaseScreens as any)[phase];
+          if (screenVal !== 'main') {
+            const [left, top] = screenVal.split(',');
+            const features = `popup=yes,menubar=no,toolbar=no,location=no,status=no,width=800,height=600,left=${left},top=${top}`;
+            const win = window.open('', `phase-${phase}`, features);
+            popupsRef.current[phase] = win;
+            if (win) {
+              win.document.title = `Fase: ${phase.toUpperCase()}`;
+              win.document.body.innerHTML = `
+                <style>
+                  body { background: #141414; color: #a5d6a7; font-family: 'Courier New', monospace; padding: 20px; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+                  html { scrollbar-color: #333 transparent; }
+                </style>
+                <div id="content" style="white-space: pre-wrap; border: 1px solid #333; padding: 15px; border-radius: 4px; background: #0a0a0a;">Generando...</div>
+              `;
+            }
+          }
+        });
 
         await fetch(`${API_BASE}/run-phase-1`, { method: 'POST' });
 
@@ -355,12 +412,15 @@ function App() {
           <button 
             className="config-btn"
             onClick={() => {
-              if (!showAudioSettings) fetchAudioDevices();
-              setShowAudioSettings(!showAudioSettings);
+              if (!showSettings) {
+                fetchAudioDevices();
+                fetchScreens();
+              }
+              setShowSettings(!showSettings);
             }}
-            title="Configuración de Canales de Audio"
+            title="Configuración de Audio y Pantallas"
           >
-             ⚙️ Audio
+             ⚙️ Configuración
           </button>
           <div className="status-badge">
             {isRunning && <Loader className="spin" size={14} />}
@@ -370,9 +430,9 @@ function App() {
       </header>
 
       <main>
-        {/* PANEL DE CONFIGURACIÓN DE AUDIO */}
-        {showAudioSettings && (
-          <div className="audio-settings-panel">
+        {/* PANEL DE CONFIGURACIÓN DE AUDIO Y PANTALLAS */}
+        {showSettings && (
+          <div className="audio-settings-panel" style={{ flexWrap: 'wrap' }}>
             <div className="settings-section">
               <h4>Canal: MÚSICA DE FONDO</h4>
               <label>Salida: 
@@ -406,6 +466,29 @@ function App() {
                 <input type="range" min="0" max="1" step="0.1" value={effectsVolume} onChange={e => setEffectsVolume(parseFloat(e.target.value))} />
                 <span>{effectsVolume}</span>
               </label>
+            </div>
+            
+            <div className="settings-section screens-section" style={{ borderTop: '1px solid #333', paddingTop: '15px', marginTop: '10px', minWidth: '100%' }}>
+              <h4 style={{ color: '#fca5a5' }}>Canales de Salida Visual (Pantallas)</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                {['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'].map(phase => (
+                  <label key={phase} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                    <span style={{ textTransform: 'capitalize' }}>{phase}</span>
+                    <select 
+                      value={(phaseScreens as any)[phase]} 
+                      onChange={e => setPhaseScreens(prev => ({ ...prev, [phase]: e.target.value }))}
+                      style={{ flex: 1, maxWidth: '280px' }}
+                    >
+                      <option value="main">Pestaña Principal (Default)</option>
+                      {screens.map((s, i) => (
+                        <option key={`screen-${s.left}-${s.top}`} value={`${s.left},${s.top}`}>
+                          {s.label || `Pantalla Ext. ${i + 1}`} ({s.width}x{s.height})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
         )}
