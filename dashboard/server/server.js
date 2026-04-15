@@ -1,403 +1,298 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const fetch = require('node-fetch');
+const db = require('./db');
 
 const app = express();
 const PORT = 3001;
 
-// Configuración de CORS abierta para túneles públicos
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'anthropic-version']
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'anthropic-version', 'x-user-name']
 }));
 app.use(bodyParser.json({ limit: '50mb' }));
 
 const ROOT_PATH = path.resolve(__dirname, '../../');
 const WORKSPACES = ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'];
 
-// Configuración de proveedores
-const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
+// --- HELPERS ---
+const getUserIdFromHeaders = (req) => {
+    const username = req.headers['x-user-name'] || 'Invitado';
+    const user = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    return user ? user.id : 4; 
+};
 
-// 1. Generar Thinking Inicial — Soporta Ollama o NVIDIA
+const getEffectiveSessionId = (req) => {
+    if (req.body && req.body.sessionId) return req.body.sessionId;
+    if (req.query && req.query.sessionId) return req.query.sessionId;
+    const userId = getUserIdFromHeaders(req);
+    const session = db.prepare('SELECT id FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').get(userId);
+    return session ? session.id : null;
+};
+
+// --- RUTAS DE USUARIOS ---
+app.get('/api/users', (req, res) => res.json(db.prepare('SELECT * FROM users').all()));
+
+app.post('/api/login', (req, res) => {
+    const { username } = req.body;
+    const user = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    if (!user) return res.status(404).json({ error: 'No user' });
+    let session = db.prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').get(user.id);
+    if (!session) {
+        const r = db.prepare('INSERT INTO sessions (user_id, input_prompt) VALUES (?, ?)').run(user.id, 'Sesión inicial');
+        session = { id: r.lastInsertRowid, user_id: user.id };
+    }
+    res.json({ user, session });
+});
+
+// --- UI STATE ---
+app.get('/api/ui-state', (req, res) => {
+    const sid = getEffectiveSessionId(req);
+    if (!sid) return res.json({ layout_data: null });
+    const s = db.prepare('SELECT * FROM ui_state WHERE session_id = ? ORDER BY created_at DESC LIMIT 1').get(sid);
+    if (s && s.layout_data) s.layout_data = JSON.parse(s.layout_data);
+    res.json(s || { layout_data: null });
+});
+
+app.post('/api/ui-state', (req, res) => {
+    const sid = getEffectiveSessionId(req);
+    if (sid) db.prepare('INSERT INTO ui_state (session_id, layout_data, active_view) VALUES (?, ?)').run(sid, JSON.stringify(req.body.layout_data));
+    res.json({ success: true });
+});
+
+// --- GENERACIÓN ---
+
+app.post('/api/generate-music', async (req, res) => {
+    const { query } = req.body;
+    const sid = getEffectiveSessionId(req);
+    const API_KEY = process.env.ELEVENLABS_API_KEY;
+    if (!API_KEY || API_KEY.includes('tu_')) return res.json({ success: false, error: 'API Key missing' });
+
+    try {
+        const musicPrompt = `Cinematic dark ambient for: ${query}`;
+        console.log(`[MUSIC] Generando música para: "${musicPrompt}"`);
+        
+        const elRes = await fetch('https://api.elevenlabs.io/v1/sound-generation', {
+            method: 'POST',
+            headers: { 'xi-api-key': API_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: musicPrompt, duration_seconds: 22 })
+        });
+        
+        if (!elRes.ok) {
+            const errorText = await elRes.text();
+            console.error(`[MUSIC] Error de ElevenLabs: ${elRes.status} - ${errorText}`);
+            throw new Error(`ElevenLabs API error: ${elRes.status}`);
+        }
+        
+        const fileName = `fondo_${Date.now()}.mp3`;
+        const audioDir = path.join(ROOT_PATH, 'dashboard/client/public/audio');
+        if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
+        
+        const destStream = fs.createWriteStream(path.join(audioDir, fileName));
+        
+        // Manejar errores del stream
+        destStream.on('error', (err) => {
+            console.error(`[MUSIC] Error escribiendo archivo: ${err.message}`);
+            if (!res.headersSent) {
+                res.json({ success: false, error: 'Error guardando archivo de audio' });
+            }
+        });
+        
+        destStream.on('finish', () => {
+            console.log(`[MUSIC] Archivo guardado: ${fileName}`);
+            if (sid) {
+                db.prepare('INSERT INTO audio_config (session_id, music_prompt, music_url) VALUES (?, ?, ?)').run(sid, musicPrompt, `/audio/${fileName}`);
+            }
+            if (!res.headersSent) {
+                res.json({ success: true, audioUrl: `/audio/${fileName}`, musicPrompt });
+            }
+        });
+        
+        elRes.body.pipe(destStream);
+        
+    } catch (err) { 
+        console.error(`[MUSIC] Error general: ${err.message}`);
+        if (!res.headersSent) {
+            res.json({ success: false, error: err.message }); 
+        }
+    }
+});
+
 app.post('/api/generate-thinking', async (req, res) => {
     const { prompt } = req.body;
-    const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
+    const uid = getUserIdFromHeaders(req);
+    const sid = db.prepare('INSERT INTO sessions (user_id, input_prompt) VALUES (?, ?)').run(uid, prompt).lastInsertRowid;
     
-    let url, model, headers;
-    
-    if (PROVIDER === 'nvidia') {
-        url = process.env.NVIDIA_BASE_URL + '/chat/completions';
-        model = process.env.NVIDIA_MODEL || 'deepseek-ai/deepseek-v3.2';
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.NVIDIA_API_KEY}`
-        };
-        console.log(`>> Iniciando generación de thinking con NVIDIA (${model})...`);
-    } else {
-        url = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
-        model = process.env.OLLAMA_MODEL || 'qwen3.5:4b';
-        headers = { 'Content-Type': 'application/json' };
-        console.log(`>> Iniciando generación de thinking con Ollama (${model})...`);
-    }
+    res.json({ success: true, sessionId: sid });
 
-    // Borrar el thinking anterior para que el cliente sepa que está generando uno nuevo
-    const thinkingPath = path.join(ROOT_PATH, 'thinking.txt');
-    if (fs.existsSync(thinkingPath)) {
-        try { fs.unlinkSync(thinkingPath); } catch(e) {}
-    }
-
-    // Respondemos de inmediato
-    res.json({ success: true, message: `Generación de thinking iniciada con ${PROVIDER.toUpperCase()}` });
-
-    // Proceso en segundo plano
     (async () => {
         try {
-            const body = {
-                model: model,
-                messages: [{ role: 'user', content: prompt }],
-                stream: false
-            };
-
-            // Parámetro específico para NVIDIA DeepSeek thinking
-            if (PROVIDER === 'nvidia') {
-                body.chat_template_kwargs = { thinking: true };
+            // FORZAR OLLAMA PARA EL THINKING
+            const url = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
+            const body = { model: process.env.OLLAMA_MODEL || 'qwen3.5:4b', messages: [{ role: 'user', content: prompt }], stream: false };
+            const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const d = await r.json();
+            let think = d.choices?.[0]?.message?.content || "";
+            if (think) {
+                const formatted = think.includes('<think>') ? think : `<think>\n${think}\n</think>`;
+                db.prepare('UPDATE sessions SET thinking = ? WHERE id = ?').run(formatted, sid);
+                console.log(`[OK] Thinking Sesión ${sid}`);
             }
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify(body)
-            });
-            const data = await response.json();
-
-            const message = data.choices && data.choices[0] && data.choices[0].message;
-            let thinking = '';
-            if (message) {
-                const content = message.content || '';
-                // Algunos modelos (como DeepSeek-R1) exponen reasoning_content
-                const reasoning = message.reasoning_content || message.reasoning || '';
-                thinking = reasoning
-                    ? `<think>\n${reasoning}\n</think>\n\n${content}`
-                    : content;
-            }
-
-            if (thinking) {
-                fs.writeFileSync(thinkingPath, String(thinking));
-                console.log(`>> Thinking generado con ${PROVIDER.toUpperCase()} (${model}) y guardado.`);
-            } else {
-                console.error(`>> Error: ${PROVIDER.toUpperCase()} no retornó contenido.`, data);
-            }
-        } catch (error) {
-            console.error('Error generando thinking en segundo plano:', error);
-        }
+        } catch (e) { console.error('Thinking Error:', e); }
     })();
 });
 
-// 2. Ejecutar Fase 1 (Agentes OpenClaw) - ASÍNCRONO para evitar Timeouts
 app.post('/api/run-phase-1', (req, res) => {
-    console.log('>> Iniciando Fase 1 (Orquestación de Agentes)...');
+    const sid = getEffectiveSessionId(req);
+    const session = db.prepare('SELECT thinking FROM sessions WHERE id = ?').get(sid);
+    if (!session?.thinking) return res.status(400).json({ error: 'Thinking not ready' });
     
-    // Limpiar resultados anteriores para que el polling detecte que el proceso es nuevo
-    WORKSPACES.forEach(agent => {
-        const filePath = path.join(ROOT_PATH, 'workspaces', agent, 'RESULTADO_FASE1.md');
-        if (fs.existsSync(filePath)) {
-            try { fs.unlinkSync(filePath); } catch(e) {}
-        }
-    });
-
-    // Respondemos inmediatamente al cliente
-    res.json({ success: true, message: 'Proceso iniciado en segundo plano' });
-
-    // Ejecutamos el script sin esperar a que termine para la respuesta HTTP
-    exec('bash ejecutar_fase1.sh', { cwd: ROOT_PATH }, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Error script: ${error}`);
-            return;
-        }
-        console.log('>> Fase 1 completada exitosamente.');
-    });
+    res.json({ success: true });
+    WORKSPACES.forEach(name => ejecutarAgente(sid, name, session.thinking));
 });
 
-// 3. Leer Resultados Finales
-app.get('/api/results', (req, res) => {
-    const results = {};
+// Función para obtener definición de agente (personalizada o por defecto)
+function getAgentDefinition(sessionId, agentName) {
+    // Intentar obtener definición personalizada de la sesión
+    const custom = db.prepare('SELECT definition FROM agent_definitions WHERE session_id = ? AND agent_name = ?')
+        .get(sessionId, agentName);
     
-    // Incluir thinking inicial
-    const thinkingPath = path.join(ROOT_PATH, 'thinking.txt');
-    if (fs.existsSync(thinkingPath)) {
-        results['thinking'] = fs.readFileSync(thinkingPath, 'utf-8');
-    } else {
-        results['thinking'] = "Generando...";
-    }
+    if (custom) return custom.definition;
+    
+    // Si no existe, usar definición por defecto
+    const defaultDef = db.prepare('SELECT definition FROM default_agent_definitions WHERE agent_name = ?')
+        .get(agentName);
+    
+    return defaultDef ? defaultDef.definition : '';
+}
 
-    WORKSPACES.forEach(agent => {
-        const filePath = path.join(ROOT_PATH, 'workspaces', agent, 'RESULTADO_FASE1.md');
-        if (fs.existsSync(filePath)) {
-            results[agent] = fs.readFileSync(filePath, 'utf-8');
+async function ejecutarAgente(sid, name, thinking) {
+    const start = Date.now();
+    const PROVIDER = process.env.LLM_PROVIDER;
+    
+    // Obtener definición desde BD (personalizada o por defecto)
+    const instructions = getAgentDefinition(sid, name);
+    const p = `IDENTIDAD: ${instructions}\n\nANALIZA ESTE RAZONAMIENTO:\n${thinking}`;
+
+    try {
+        let url, model, headers, body;
+        if (PROVIDER === 'anthropic') {
+            url = 'https://api.anthropic.com/v1/messages';
+            model = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
+            headers = { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' };
+            body = { model, max_tokens: 4096, messages: [{ role: 'user', content: p }] };
         } else {
-            results[agent] = "En proceso...";
+            url = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
+            model = process.env.OLLAMA_MODEL || 'qwen3.5:4b';
+            headers = { 'Content-Type': 'application/json' };
+            body = { model, messages: [{ role: 'user', content: p }], stream: false };
         }
+        const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+        const d = await r.json();
+        const res = (PROVIDER === 'anthropic') ? d.content[0].text : d.choices[0].message.content;
+        db.prepare('INSERT INTO agent_logs (session_id, agent_name, result, status, duration_ms, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(sid, name, res, 'SUCCESS', Date.now() - start, PROVIDER, model);
+        console.log(`[OK] Agente ${name} (${sid})`);
+    } catch (e) {
+        db.prepare('INSERT INTO agent_logs (session_id, agent_name, result, status) VALUES (?, ?, ?, ?)')
+          .run(sid, name, `Error: ${e.message}`, 'FAILED');
+    }
+}
+
+app.get('/api/results', (req, res) => {
+    const sid = getEffectiveSessionId(req);
+    if (!sid) return res.json({});
+    const s = db.prepare('SELECT thinking FROM sessions WHERE id = ?').get(sid);
+    const logs = db.prepare('SELECT agent_name, result FROM agent_logs WHERE session_id = ?').all(sid);
+    const resObj = { thinking: s?.thinking || "[ESPERANDO THINKING...]" };
+    WORKSPACES.forEach(a => resObj[a] = "[ANALIZANDO...]");
+    logs.forEach(l => resObj[l.agent_name] = l.result);
+    res.json(resObj);
+});
+
+// --- ENDPOINTS DE DEFINICIONES DE AGENTES ---
+
+// Obtener definiciones de agentes para una sesión (personalizadas o por defecto)
+app.get('/api/agent-definitions/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const definitions = {};
+    
+    WORKSPACES.forEach(agentName => {
+        definitions[agentName] = getAgentDefinition(sessionId, agentName);
     });
     
-    res.json(results);
+    res.json(definitions);
 });
 
-const { applyClustering } = require('./clustering');
-
-// 4. Servir el grafo de conocimiento consolidado
-app.get('/api/grafo', (req, res) => {
-    const grafoPath = path.join(ROOT_PATH, 'grafo.json');
-    if (fs.existsSync(grafoPath)) {
-        try {
-            const content = fs.readFileSync(grafoPath, 'utf-8');
-            if (!content || content.trim() === '') {
-                return res.json({ metadata: { error: 'Grafo vacío' }, entidades: [], relaciones: [] });
-            }
-            
-            let data = JSON.parse(content);
-            // Aplicar clustering al vuelo
-            data = applyClustering(data);
-            
-            res.json(data);
-        } catch (e) {
-            res.status(500).json({ error: 'Error al leer el grafo', details: e.message });
-        }
-    } else {
-        res.json({ metadata: { status: 'esperando_datos' }, entidades: [], relaciones: [] });
+// Obtener definición de un agente específico
+app.get('/api/agent-definitions/:sessionId/:agentName', (req, res) => {
+    const { sessionId, agentName } = req.params;
+    
+    if (!WORKSPACES.includes(agentName)) {
+        return res.status(404).json({ error: 'Agente no encontrado' });
     }
+    
+    const definition = getAgentDefinition(sessionId, agentName);
+    res.json({ agentName, definition });
 });
 
-// 5. Generar Música de Fondo con ElevenLabs API
-app.post('/api/generate-music', async (req, res) => {
-    const { query } = req.body;
-    if (!query) return res.status(400).json({ success: false, error: 'query requerida' });
-
-    const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-    if (!ELEVENLABS_API_KEY || ELEVENLABS_API_KEY.includes('tu_')) {
-        return res.json({ success: false, error: 'Falta configurar ELEVENLABS_API_KEY en .env' });
+// Actualizar definición de un agente para una sesión específica
+app.post('/api/agent-definitions/:sessionId/:agentName', (req, res) => {
+    const { sessionId, agentName } = req.params;
+    const { definition } = req.body;
+    
+    if (!WORKSPACES.includes(agentName)) {
+        return res.status(404).json({ error: 'Agente no encontrado' });
     }
-
-    console.log(`\n🎵 Iniciando generación de música (ElevenLabs) para: "${query}"`);
-
+    
+    if (!definition || typeof definition !== 'string') {
+        return res.status(400).json({ error: 'Definición inválida' });
+    }
+    
     try {
-        // Paso 1: Pedirle a Claude que deduzca el prompt de música
-        console.log('   >> Consultando a Claude para deducir prompt de música...');
-        const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': process.env.ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-                model: process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001',
-                max_tokens: 200,
-                messages: [{
-                    role: 'user',
-                    content: `Eres un compositor musical. Dado el siguiente enunciado crítico o filosófico, genera UN prompt corto (máximo 20 palabras, en inglés) para una pieza instrumental de fondo que capture la tensión, el tono y la atmósfera conceptual del tema.
-
-Describe solo: género musical, mood, tempo e instrumentos principales. Sin comillas, sin explicaciones, solo el prompt.
-
-Enunciado: "${query}"`
-                }]
-            })
-        });
-        const claudeData = await claudeRes.json();
-        const musicPrompt = claudeData.content && claudeData.content[0] && claudeData.content[0].text
-            ? claudeData.content[0].text.trim()
-            : `Ambient instrumental, dark and tense, slow tempo, piano and strings, philosophical mood`;
-
-        console.log(`   >> Prompt generado: "${musicPrompt}"`);
-
-        // Paso 2: Llamar a ElevenLabs para generar audio corto (~22s) en un solo request
-        console.log('   >> Enviando prompt a ElevenLabs (esperando MP3 stream)...');
+        // Insertar o actualizar definición personalizada
+        db.prepare(`
+            INSERT INTO agent_definitions (session_id, agent_name, definition)
+            VALUES (?, ?, ?)
+            ON CONFLICT(session_id, agent_name) 
+            DO UPDATE SET definition = excluded.definition, created_at = CURRENT_TIMESTAMP
+        `).run(sessionId, agentName, definition);
         
-        // El endpoint /v1/sound-generation sirve perfectamente para música e instrumentales cortos
-        const elRes = await fetch('https://api.elevenlabs.io/v1/sound-generation', {
-            method: 'POST',
-            headers: {
-                'xi-api-key': ELEVENLABS_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                text: musicPrompt,
-                duration_seconds: 22,
-                prompt_influence: 0.3
-            })
-        });
-
-        if (!elRes.ok) {
-            const errBody = await elRes.text();
-            console.error('   !! Error de ElevenLabs:', errBody);
-            return res.json({ success: false, error: 'ElevenLabs API falló', musicPrompt });
-        }
-
-        // Paso 3: Guardar el stream MP3 resultante de forma local
-        const audioDir = path.join(ROOT_PATH, 'dashboard/client/public/audio');
-        if (!fs.existsSync(audioDir)) {
-            fs.mkdirSync(audioDir, { recursive: true });
-        }
-        
-        // Usamos un nombre único por query usando timestamp
-        const timestamp = Date.now();
-        const fileName = `fondo_${timestamp}.mp3`;
-        const destPath = path.join(audioDir, fileName);
-        
-        const destStream = fs.createWriteStream(destPath);
-        elRes.body.pipe(destStream);
-
-        destStream.on('finish', () => {
-            console.log(`   ✅ Audio guardado en: ${destPath}`);
-            // Retornamos la ruta pública manejada por Vite/React
-            return res.json({ 
-                success: true, 
-                audioUrl: `/audio/${fileName}`, 
-                musicPrompt 
-            });
-        });
-
-        destStream.on('error', (err) => {
-            console.error('   !! Error guardando archivo:', err);
-            return res.json({ success: false, error: 'Fallo al guardar MP3' });
-        });
-
-    } catch (err) {
-        console.error('Error en /api/generate-music:', err);
-        return res.status(500).json({ success: false, error: err.message });
+        res.json({ success: true, agentName, sessionId });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 
-// 5. Convertir texto a voz (Thinking) con ElevenLabs API
-app.post('/api/speak-thinking', async (req, res) => {
-    const { text, voiceId } = req.body;
-    if (!text) return res.status(400).json({ success: false, error: 'text requerido' });
-
-    const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-    if (!ELEVENLABS_API_KEY || ELEVENLABS_API_KEY.includes('tu_')) {
-        return res.json({ success: false, error: 'Falta configurar ELEVENLABS_API_KEY en .env' });
+// Resetear definición de un agente a su valor por defecto
+app.delete('/api/agent-definitions/:sessionId/:agentName', (req, res) => {
+    const { sessionId, agentName } = req.params;
+    
+    if (!WORKSPACES.includes(agentName)) {
+        return res.status(404).json({ error: 'Agente no encontrado' });
     }
-
-    // Limpiar: Eliminar los tags <think> y su cierre, manteniendo el contenido interior.
-    // También limpiamos posibles saltos de línea extra fuertes.
-    let cleanText = text.replace(/<\/?think>/gi, '').trim();
-
-    // ElevenLabs tiene un límite de 5000 caracteres por request en su API de TTS estándar.
-    if (cleanText.length > 4900) {
-        cleanText = cleanText.substring(0, 4900) + '...';
-    }
-
-    // Voz por defecto: Adam (voz profunda/masculina)
-    const selectedVoiceId = voiceId || 'pNInz6obpgDQGcFmaJgB'; 
-
-    console.log(`\n🗣️ Iniciando Text-to-Speech (ElevenLabs) para thinking (${cleanText.length} caracteres). Voice ID: ${selectedVoiceId}`);
-
+    
     try {
-        const elRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
-            method: 'POST',
-            headers: {
-                'xi-api-key': ELEVENLABS_API_KEY,
-                'Content-Type': 'application/json',
-                Accept: 'audio/mpeg'
-            },
-            body: JSON.stringify({
-                text: cleanText,
-                model_id: "eleven_multilingual_v2",
-                voice_settings: {
-                    stability: 0.5,
-                    similarity_boost: 0.75
-                }
-            })
-        });
-
-        if (!elRes.ok) {
-            const errBody = await elRes.text();
-            console.error('   !! Error de ElevenLabs:', errBody);
-            return res.json({ success: false, error: 'ElevenLabs API falló' });
-        }
-
-        const audioDir = path.join(ROOT_PATH, 'dashboard/client/public/audio');
-        if (!fs.existsSync(audioDir)) {
-            fs.mkdirSync(audioDir, { recursive: true });
-        }
+        db.prepare('DELETE FROM agent_definitions WHERE session_id = ? AND agent_name = ?')
+            .run(sessionId, agentName);
         
-        const timestamp = Date.now();
-        const fileName = `thinking_${timestamp}.mp3`;
-        const destPath = path.join(audioDir, fileName);
-        
-        const destStream = fs.createWriteStream(destPath);
-        elRes.body.pipe(destStream);
-
-        destStream.on('finish', () => {
-            console.log(`   ✅ Audio guardado en: ${destPath}`);
-            return res.json({ 
-                success: true, 
-                audioUrl: `/audio/${fileName}`
-            });
-        });
-
-        destStream.on('error', (err) => {
-            console.error('   !! Error guardando archivo thinking:', err);
-            return res.json({ success: false, error: 'Fallo al guardar MP3' });
-        });
-
-    } catch (err) {
-        console.error('Error en /api/speak-thinking:', err);
-        return res.status(500).json({ success: false, error: err.message });
+        res.json({ success: true, message: 'Definición reseteada a valor por defecto' });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 
-// 6. Dictado por voz / Speech-to-Text (ElevenLabs API)
-app.post('/api/transcribe', async (req, res) => {
-    const { audioBase64, mimeType } = req.body;
-    if (!audioBase64) return res.status(400).json({ success: false, error: 'audioBase64 requerido' });
-
-    const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-    if (!ELEVENLABS_API_KEY || ELEVENLABS_API_KEY.includes('tu_')) {
-        return res.json({ success: false, error: 'Falta configurar ELEVENLABS_API_KEY en .env' });
-    }
-
-    console.log(`\n🎙️ Procesando audio STT de usuario (mimeType: ${mimeType || 'audio/webm'})...`);
-
-    try {
-        const buffer = Buffer.from(audioBase64, 'base64');
-        const fileBlob = new Blob([buffer], { type: mimeType || 'audio/webm' });
-        
-        const formData = new FormData();
-        formData.append('file', fileBlob, 'audio.webm'); 
-        formData.append('model_id', 'scribe_v1');
-
-        const elRes = await globalThis.fetch('https://api.elevenlabs.io/v1/speech-to-text', {
-            method: 'POST',
-            headers: {
-                'xi-api-key': ELEVENLABS_API_KEY
-            },
-            body: formData
-        });
-
-        if (!elRes.ok) {
-            const errBody = await elRes.text();
-            console.error('   !! Error STT ElevenLabs:', errBody);
-            return res.json({ success: false, error: 'ElevenLabs STT falló' });
-        }
-
-        const data = await elRes.json();
-        const transcription = data.text;
-
-        console.log(`   ✅ Audio transcrito con éxito: "${transcription}"`);
-        return res.json({ success: true, text: transcription });
-    } catch (err) {
-        console.error('Error en /api/transcribe:', err);
-        return res.status(500).json({ success: false, error: err.message });
-    }
+// Obtener todas las definiciones por defecto
+app.get('/api/default-agent-definitions', (req, res) => {
+    const defaults = db.prepare('SELECT agent_name, definition FROM default_agent_definitions').all();
+    const result = {};
+    defaults.forEach(d => result[d.agent_name] = d.definition);
+    res.json(result);
 });
 
-app.listen(PORT, () => {
-    console.log(`\n🦞 TC2026 Dashboard Server running on http://localhost:${PORT}`);
-    console.log(`Root Path: ${ROOT_PATH}\n`);
-});
+app.listen(PORT, () => console.log(`🚀 SERVER ONLINE`));
