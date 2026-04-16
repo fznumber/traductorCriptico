@@ -57,10 +57,41 @@ db.prepare(`
         voice_id TEXT,
         is_enabled BOOLEAN DEFAULT 1,
         volume REAL DEFAULT 0.5,
+        music_device_id TEXT DEFAULT 'default',
+        music_pan REAL DEFAULT 0,
+        music_volume REAL DEFAULT 1,
+        effects_device_id TEXT DEFAULT 'default',
+        effects_pan REAL DEFAULT 0,
+        effects_volume REAL DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     )
 `).run();
+
+// Migración: Agregar columnas nuevas si no existen
+const addColumnIfNotExists = (table, column, type, defaultValue) => {
+    try {
+        db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${type} DEFAULT ${defaultValue}`).run();
+    } catch (e) {
+        // Columna ya existe, ignorar
+    }
+};
+
+addColumnIfNotExists('audio_config', 'music_device_id', 'TEXT', "'default'");
+addColumnIfNotExists('audio_config', 'music_pan', 'REAL', '0');
+addColumnIfNotExists('audio_config', 'music_volume', 'REAL', '1');
+addColumnIfNotExists('audio_config', 'effects_device_id', 'TEXT', "'default'");
+addColumnIfNotExists('audio_config', 'effects_pan', 'REAL', '0');
+addColumnIfNotExists('audio_config', 'effects_volume', 'REAL', '1');
+
+// Para updated_at, no podemos usar CURRENT_TIMESTAMP en ALTER TABLE
+try {
+    db.prepare('ALTER TABLE audio_config ADD COLUMN updated_at DATETIME').run();
+    db.prepare('UPDATE audio_config SET updated_at = created_at WHERE updated_at IS NULL').run();
+} catch (e) {
+    // Columna ya existe, ignorar
+}
 
 // 5. Configuración de Pantallas y UI
 db.prepare(`

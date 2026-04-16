@@ -12,7 +12,7 @@ const PORT = 3001;
 
 app.use(cors({
     origin: '*',
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'anthropic-version', 'x-user-name']
 }));
 app.use(bodyParser.json({ limit: '50mb' }));
@@ -22,9 +22,22 @@ const WORKSPACES = ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion']
 
 // --- HELPERS ---
 const getUserIdFromHeaders = (req) => {
-    const username = req.headers['x-user-name'] || 'Invitado';
+    const username = req.headers['x-user-name'];
+    
+    if (!username) {
+        console.log('[AUTH] ⚠️ Header x-user-name no proporcionado, usando Invitado por defecto');
+        return 4; // Invitado
+    }
+    
     const user = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
-    return user ? user.id : 4; 
+    
+    if (!user) {
+        console.log(`[AUTH] ⚠️ Usuario "${username}" no encontrado, usando Invitado por defecto`);
+        return 4; // Invitado
+    }
+    
+    console.log(`[AUTH] ✓ Usuario autenticado: "${username}" (ID: ${user.id})`);
+    return user.id;
 };
 
 const getEffectiveSessionId = (req) => {
@@ -40,7 +53,7 @@ app.get('/api/users', (req, res) => res.json(db.prepare('SELECT * FROM users').a
 
 app.post('/api/login', (req, res) => {
     const { username } = req.body;
-    const user = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    const user = db.prepare('SELECT id, username FROM users WHERE username = ?').get(username);
     if (!user) return res.status(404).json({ error: 'No user' });
     let session = db.prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').get(user.id);
     if (!session) {
@@ -48,6 +61,57 @@ app.post('/api/login', (req, res) => {
         session = { id: r.lastInsertRowid, user_id: user.id };
     }
     res.json({ user, session });
+});
+
+// --- RUTAS DE SESIONES ---
+app.get('/api/sessions', (req, res) => {
+    const userId = getUserIdFromHeaders(req);
+    const username = req.headers['x-user-name'] || 'Desconocido';
+    
+    const sessions = db.prepare(`
+        SELECT id, input_prompt, created_at, 
+               CASE WHEN thinking IS NOT NULL AND thinking != '' THEN 1 ELSE 0 END as has_thinking
+        FROM sessions 
+        WHERE user_id = ? 
+        ORDER BY created_at DESC
+    `).all(userId);
+    
+    console.log(`[GET SESSIONS] Usuario "${username}" (ID: ${userId}) tiene ${sessions.length} sesiones`);
+    res.json(sessions);
+});
+
+app.post('/api/sessions/new', (req, res) => {
+    const userId = getUserIdFromHeaders(req);
+    const { input_prompt } = req.body;
+    const result = db.prepare('INSERT INTO sessions (user_id, input_prompt) VALUES (?, ?)').run(userId, input_prompt || 'Nueva sesión');
+    res.json({ sessionId: result.lastInsertRowid });
+});
+
+app.delete('/api/sessions/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const userId = getUserIdFromHeaders(req);
+    const username = req.headers['x-user-name'] || 'Desconocido';
+    const session = db.prepare('SELECT user_id FROM sessions WHERE id = ?').get(sessionId);
+    
+    console.log(`[DELETE SESSION] User "${username}" (ID: ${userId}) intenta eliminar sesión ${sessionId}`);
+    
+    if (!session) {
+        console.log(`[DELETE SESSION] Sesión ${sessionId} no encontrada`);
+        return res.status(404).json({ error: 'Sesión no encontrada' });
+    }
+    
+    if (session.user_id !== userId) {
+        const sessionOwner = db.prepare('SELECT username FROM users WHERE id = ?').get(session.user_id);
+        console.log(`[DELETE SESSION] ❌ Autorización denegada: sesión pertenece a "${sessionOwner?.username}" (ID: ${session.user_id})`);
+        return res.status(403).json({ 
+            error: 'No autorizado', 
+            message: `Esta sesión pertenece a otro usuario` 
+        });
+    }
+    
+    db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+    console.log(`[DELETE SESSION] ✅ Sesión ${sessionId} eliminada exitosamente por "${username}"`);
+    res.json({ success: true });
 });
 
 // --- UI STATE ---
@@ -62,6 +126,56 @@ app.get('/api/ui-state', (req, res) => {
 app.post('/api/ui-state', (req, res) => {
     const sid = getEffectiveSessionId(req);
     if (sid) db.prepare('INSERT INTO ui_state (session_id, layout_data, active_view) VALUES (?, ?)').run(sid, JSON.stringify(req.body.layout_data));
+    res.json({ success: true });
+});
+
+// --- AUDIO CONFIG ---
+app.get('/api/audio-config', (req, res) => {
+    const sid = getEffectiveSessionId(req);
+    if (!sid) return res.json({ 
+        music_device_id: 'default', music_pan: 0, music_volume: 1,
+        effects_device_id: 'default', effects_pan: 0, effects_volume: 1,
+        music_url: null, music_prompt: null
+    });
+    const config = db.prepare('SELECT * FROM audio_config WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1').get(sid);
+    console.log(`[GET AUDIO CONFIG] Sesión ${sid}, config encontrada:`, config ? 'SÍ' : 'NO');
+    if (config) {
+        console.log(`[GET AUDIO CONFIG] music_url: ${config.music_url}, music_prompt: ${config.music_prompt}`);
+    }
+    res.json(config || { 
+        music_device_id: 'default', music_pan: 0, music_volume: 1,
+        effects_device_id: 'default', effects_pan: 0, effects_volume: 1,
+        music_url: null, music_prompt: null
+    });
+});
+
+app.post('/api/audio-config', (req, res) => {
+    const sid = getEffectiveSessionId(req);
+    if (!sid) return res.status(400).json({ error: 'No session' });
+    
+    const { music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume } = req.body;
+    
+    // Verificar si ya existe configuración para esta sesión
+    const existing = db.prepare('SELECT id FROM audio_config WHERE session_id = ?').get(sid);
+    
+    if (existing) {
+        // Actualizar
+        db.prepare(`
+            UPDATE audio_config 
+            SET music_device_id = ?, music_pan = ?, music_volume = ?,
+                effects_device_id = ?, effects_pan = ?, effects_volume = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE session_id = ?
+        `).run(music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume, sid);
+    } else {
+        // Insertar
+        db.prepare(`
+            INSERT INTO audio_config 
+            (session_id, music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(sid, music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume);
+    }
+    
     res.json({ success: true });
 });
 
@@ -106,7 +220,20 @@ app.post('/api/generate-music', async (req, res) => {
         destStream.on('finish', () => {
             console.log(`[MUSIC] Archivo guardado: ${fileName}`);
             if (sid) {
-                db.prepare('INSERT INTO audio_config (session_id, music_prompt, music_url) VALUES (?, ?, ?)').run(sid, musicPrompt, `/audio/${fileName}`);
+                // Verificar si ya existe configuración para esta sesión
+                const existing = db.prepare('SELECT id FROM audio_config WHERE session_id = ?').get(sid);
+                
+                if (existing) {
+                    // Actualizar música en registro existente
+                    db.prepare(`
+                        UPDATE audio_config 
+                        SET music_prompt = ?, music_url = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE session_id = ?
+                    `).run(musicPrompt, `/audio/${fileName}`, sid);
+                } else {
+                    // Insertar nuevo registro
+                    db.prepare('INSERT INTO audio_config (session_id, music_prompt, music_url) VALUES (?, ?, ?)').run(sid, musicPrompt, `/audio/${fileName}`);
+                }
             }
             if (!res.headersSent) {
                 res.json({ success: true, audioUrl: `/audio/${fileName}`, musicPrompt });
