@@ -55,6 +55,8 @@ function App() {
   const [effectsDeviceId, setEffectsDeviceId] = useState<string>('default');
   const [effectsPan, setEffectsPan] = useState(0);
   const [effectsVolume, setEffectsVolume] = useState(1);
+  
+  const [musicInstructionTemplate, setMusicInstructionTemplate] = useState<string>('Cinematic dark ambient for: {prompt}');
 
   const musicCtxRef = useRef<AudioContext | null>(null);
   const musicPannerRef = useRef<StereoPannerNode | null>(null);
@@ -168,6 +170,7 @@ function App() {
         setEffectsDeviceId(audioData.effects_device_id || 'default');
         setEffectsPan(audioData.effects_pan || 0);
         setEffectsVolume(audioData.effects_volume || 1);
+        setMusicInstructionTemplate(audioData.music_instruction_template || 'Cinematic dark ambient for: {prompt}');
         
         // Música generada para esta sesión
         if (audioData.music_url) {
@@ -307,7 +310,8 @@ function App() {
           music_volume: musicVolume,
           effects_device_id: effectsDeviceId,
           effects_pan: effectsPan,
-          effects_volume: effectsVolume
+          effects_volume: effectsVolume,
+          music_instruction_template: musicInstructionTemplate
         })
       });
     } catch (e) {
@@ -520,7 +524,7 @@ function App() {
       }, 500); // Debounce de 500ms
       return () => clearTimeout(timeoutId);
     }
-  }, [musicDeviceId, musicPan, musicVolume, effectsDeviceId, effectsPan, effectsVolume, currentSessionId]);
+  }, [musicDeviceId, musicPan, musicVolume, effectsDeviceId, effectsPan, effectsVolume, musicInstructionTemplate, currentSessionId]);
 
   const handleSpeakThinking = async () => {
     if (!results.thinking) return;
@@ -686,19 +690,88 @@ function App() {
             const data = await resRes.json();
             setResults((prev: any) => ({ ...prev, ...data }));
 
-            const isFinished = !Object.values(data).some(v => 
-              String(v).includes('ANALIZANDO') || String(v).includes('ESPERANDO')
+            // Verificar solo los agentes de Fase 1
+            const fase1Agents = ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'];
+            const fase1Finished = fase1Agents.every(agent => 
+              data[agent] && 
+              !String(data[agent]).includes('ANALIZANDO') && 
+              !String(data[agent]).includes('ESPERANDO')
             );
 
-            if (isFinished && Object.keys(data).length >= 5) {
+            if (fase1Finished) {
               clearInterval(pollInterval);
               setStatus('completed');
-              addLog('>> ✅ Análisis de agentes finalizado.');
+              addLog('>> ✅ Análisis Fase 1 finalizado.');
+              addLog('>> 💡 Fase 2 disponible. Haz clic en "EJECUTAR FASE 2" para continuar.');
             }
           } catch (e) { console.error('Polling error', e); }
         }, 3000);
       };
     } catch (err: any) { setStatus('idle'); }
+  };
+
+  const runPhase2 = async () => {
+    if (!currentSessionId) return;
+    
+    setStatus('processing-phase2');
+    addLog('>> Iniciando Fase 2 - Estratos de Interferencia...');
+    
+    try {
+      const res = await authFetch(`${API_BASE}/run-phase-2`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: currentSessionId })
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        addLog(`>> ❌ Error: ${data.error}`);
+        setStatus('completed');
+        return;
+      }
+      
+      addLog('>> Ejecutando agentes de Fase 2...');
+      
+      // Polling de resultados de Fase 2
+      const pollInterval = setInterval(async () => {
+        try {
+          const resRes = await authFetch(`${API_BASE}/results?sessionId=${currentSessionId}`);
+          const data = await resRes.json();
+          setResults((prev: any) => ({ ...prev, ...data }));
+
+          // Verificar si Fase 2 está completa
+          const fase2Agents = ['rag_dirigido', 'procedencia_marcos', 'cambio_semantico', 'patrones_contrastivos'];
+          
+          // Log para debugging
+          console.log('[FASE 2 POLLING] Estado de agentes:', fase2Agents.map(agent => ({
+            agent,
+            hasData: !!data[agent],
+            value: data[agent]?.substring(0, 50) + '...',
+            isAnalyzing: String(data[agent]).includes('ANALIZANDO'),
+            isWaiting: String(data[agent]).includes('ESPERANDO')
+          })));
+          
+          const fase2Complete = fase2Agents.every(agent => 
+            data[agent] && 
+            !String(data[agent]).includes('ANALIZANDO') && 
+            !String(data[agent]).includes('ESPERANDO')
+          );
+
+          if (fase2Complete) {
+            clearInterval(pollInterval);
+            setStatus('completed-phase2');
+            addLog('>> ✅ Análisis Fase 2 finalizado.');
+          }
+        } catch (e) { 
+          console.error('Polling error', e); 
+        }
+      }, 3000);
+      
+    } catch (err: any) {
+      addLog(`>> ❌ Error ejecutando Fase 2: ${err.message}`);
+      setStatus('completed');
+    }
   };
 
   const logout = () => {
@@ -835,7 +908,7 @@ function App() {
     );
   }
 
-  const isRunning = status === 'generating' || status === 'processing';
+  const isRunning = status === 'generating' || status === 'processing' || status === 'processing-phase2';
 
   return (
     <div className="app-container">
@@ -1078,6 +1151,25 @@ function App() {
                 <input type="range" min="0" max="1" step="0.1" value={musicVolume} onChange={e => setMusicVolume(parseFloat(e.target.value))} />
                 <span>{musicVolume}</span>
               </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '10px' }}>
+                <span style={{ fontSize: '11px', color: '#888' }}>Instrucción de Generación (usa {'{prompt}'} para el texto del usuario):</span>
+                <textarea 
+                  value={musicInstructionTemplate} 
+                  onChange={e => setMusicInstructionTemplate(e.target.value)}
+                  placeholder="Cinematic dark ambient for: {prompt}"
+                  style={{ 
+                    width: '100%', 
+                    minHeight: '60px', 
+                    background: '#0a0a0a', 
+                    border: '1px solid #333', 
+                    color: '#00ff41', 
+                    padding: '8px',
+                    fontFamily: 'monospace',
+                    fontSize: '11px',
+                    resize: 'vertical'
+                  }}
+                />
+              </label>
             </div>
             <div className="settings-section effects-section">
               <h4>Canal: EFECTOS Y VOZ</h4>
@@ -1142,6 +1234,17 @@ function App() {
           <button onClick={runPipeline} disabled={isRunning || isRecording || isTranscribing}>
             <Play size={16} /> ANALIZAR
           </button>
+          <button 
+            onClick={runPhase2} 
+            disabled={status !== 'completed' || isRecording || isTranscribing}
+            style={{ 
+              background: status === 'completed' ? '#7c3aed' : '#333',
+              borderColor: status === 'completed' ? '#a78bfa' : '#555'
+            }}
+            title="Ejecutar Fase 2 - Estratos de Interferencia"
+          >
+            <Play size={16} /> FASE 2
+          </button>
         </div>
 
         {/* ── Player de Música ── */}
@@ -1181,14 +1284,25 @@ function App() {
 
           <section className="results">
             <div className="tabs">
-              {['thinking', 'ausencias', 'bifurcaciones', 'grounding', 'neutralizacion', 'grafo'].map(tab => (
+              {['thinking', 'ausencias', 'bifurcaciones', 'grounding', 'neutralizacion', 'rag_dirigido', 'procedencia_marcos', 'cambio_semantico', 'patrones_contrastivos', 'grafo'].map(tab => (
                 <button
                   key={tab}
                   className={activeTab === tab ? 'active' : ''}
                   onClick={() => setActiveTab(tab)}
                   disabled={tab === 'grafo' && !grafoUrl}
+                  title={
+                    tab === 'rag_dirigido' ? 'Fase 2: RAG Dirigido' :
+                    tab === 'procedencia_marcos' ? 'Fase 2: Procedencia de Marcos' :
+                    tab === 'cambio_semantico' ? 'Fase 2: Cambio Semántico' :
+                    tab === 'patrones_contrastivos' ? 'Fase 2: Patrones Contrastivos' :
+                    tab.toUpperCase()
+                  }
                 >
-                  {tab.toUpperCase()}
+                  {tab === 'rag_dirigido' ? 'RAG' :
+                   tab === 'procedencia_marcos' ? 'PROCEDENCIA' :
+                   tab === 'cambio_semantico' ? 'SEMÁNTICA' :
+                   tab === 'patrones_contrastivos' ? 'PATRONES' :
+                   tab.toUpperCase()}
                 </button>
               ))}
             </div>

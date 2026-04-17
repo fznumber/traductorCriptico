@@ -18,7 +18,9 @@ app.use(cors({
 app.use(bodyParser.json({ limit: '50mb' }));
 
 const ROOT_PATH = path.resolve(__dirname, '../../');
-const WORKSPACES = ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'];
+const WORKSPACES_FASE1 = ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'];
+const WORKSPACES_FASE2 = ['rag_dirigido', 'procedencia_marcos', 'cambio_semantico', 'patrones_contrastivos'];
+const WORKSPACES = [...WORKSPACES_FASE1, ...WORKSPACES_FASE2];
 
 // --- HELPERS ---
 const getUserIdFromHeaders = (req) => {
@@ -135,7 +137,8 @@ app.get('/api/audio-config', (req, res) => {
     if (!sid) return res.json({ 
         music_device_id: 'default', music_pan: 0, music_volume: 1,
         effects_device_id: 'default', effects_pan: 0, effects_volume: 1,
-        music_url: null, music_prompt: null
+        music_url: null, music_prompt: null,
+        music_instruction_template: 'Cinematic dark ambient for: {prompt}'
     });
     const config = db.prepare('SELECT * FROM audio_config WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1').get(sid);
     console.log(`[GET AUDIO CONFIG] Sesión ${sid}, config encontrada:`, config ? 'SÍ' : 'NO');
@@ -145,7 +148,8 @@ app.get('/api/audio-config', (req, res) => {
     res.json(config || { 
         music_device_id: 'default', music_pan: 0, music_volume: 1,
         effects_device_id: 'default', effects_pan: 0, effects_volume: 1,
-        music_url: null, music_prompt: null
+        music_url: null, music_prompt: null,
+        music_instruction_template: 'Cinematic dark ambient for: {prompt}'
     });
 });
 
@@ -153,27 +157,36 @@ app.post('/api/audio-config', (req, res) => {
     const sid = getEffectiveSessionId(req);
     if (!sid) return res.status(400).json({ error: 'No session' });
     
-    const { music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume } = req.body;
+    const { music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume, music_instruction_template } = req.body;
     
     // Verificar si ya existe configuración para esta sesión
     const existing = db.prepare('SELECT id FROM audio_config WHERE session_id = ?').get(sid);
     
     if (existing) {
         // Actualizar
-        db.prepare(`
-            UPDATE audio_config 
-            SET music_device_id = ?, music_pan = ?, music_volume = ?,
-                effects_device_id = ?, effects_pan = ?, effects_volume = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE session_id = ?
-        `).run(music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume, sid);
+        const updates = [];
+        const values = [];
+        
+        if (music_device_id !== undefined) { updates.push('music_device_id = ?'); values.push(music_device_id); }
+        if (music_pan !== undefined) { updates.push('music_pan = ?'); values.push(music_pan); }
+        if (music_volume !== undefined) { updates.push('music_volume = ?'); values.push(music_volume); }
+        if (effects_device_id !== undefined) { updates.push('effects_device_id = ?'); values.push(effects_device_id); }
+        if (effects_pan !== undefined) { updates.push('effects_pan = ?'); values.push(effects_pan); }
+        if (effects_volume !== undefined) { updates.push('effects_volume = ?'); values.push(effects_volume); }
+        if (music_instruction_template !== undefined) { updates.push('music_instruction_template = ?'); values.push(music_instruction_template); }
+        
+        updates.push('updated_at = CURRENT_TIMESTAMP');
+        values.push(sid);
+        
+        db.prepare(`UPDATE audio_config SET ${updates.join(', ')} WHERE session_id = ?`).run(...values);
     } else {
         // Insertar
         db.prepare(`
             INSERT INTO audio_config 
-            (session_id, music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(sid, music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume);
+            (session_id, music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume, music_instruction_template)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(sid, music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume, 
+               music_instruction_template || 'Cinematic dark ambient for: {prompt}');
     }
     
     res.json({ success: true });
@@ -188,8 +201,16 @@ app.post('/api/generate-music', async (req, res) => {
     if (!API_KEY || API_KEY.includes('tu_')) return res.json({ success: false, error: 'API Key missing' });
 
     try {
-        const musicPrompt = `Cinematic dark ambient for: ${query}`;
-        console.log(`[MUSIC] Generando música para: "${musicPrompt}"`);
+        // Obtener el template de instrucción de música de la sesión
+        console.log(`[MUSIC] Buscando template para sesión: ${sid}`);
+        const audioConfig = db.prepare('SELECT music_instruction_template FROM audio_config WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1').get(sid);
+        console.log(`[MUSIC] Config encontrada:`, audioConfig);
+        const template = audioConfig?.music_instruction_template || 'Cinematic dark ambient for: {prompt}';
+        console.log(`[MUSIC] Template a usar: "${template}"`);
+        
+        // Reemplazar {prompt} con el query del usuario
+        const musicPrompt = template.replace('{prompt}', query);
+        console.log(`[MUSIC] Prompt final generado: "${musicPrompt}"`);
         
         const elRes = await fetch('https://api.elevenlabs.io/v1/sound-generation', {
             method: 'POST',
@@ -280,7 +301,47 @@ app.post('/api/run-phase-1', (req, res) => {
     if (!session?.thinking) return res.status(400).json({ error: 'Thinking not ready' });
     
     res.json({ success: true });
-    WORKSPACES.forEach(name => ejecutarAgente(sid, name, session.thinking));
+    WORKSPACES_FASE1.forEach(name => ejecutarAgente(sid, name, session.thinking));
+});
+
+app.post('/api/run-phase-2', (req, res) => {
+    const sid = getEffectiveSessionId(req);
+    console.log(`[FASE 2] Sesión: ${sid}`);
+    
+    const session = db.prepare('SELECT thinking FROM sessions WHERE id = ?').get(sid);
+    if (!session?.thinking) {
+        console.log(`[FASE 2] ❌ No hay thinking para sesión ${sid}`);
+        return res.status(400).json({ error: 'Thinking not ready' });
+    }
+    
+    // Verificar que Fase 1 esté completa
+    const fase1Logs = db.prepare('SELECT COUNT(*) as count FROM agent_logs WHERE session_id = ? AND agent_name IN (?, ?, ?, ?) AND status = ?')
+        .get(sid, 'ausencias', 'bifurcaciones', 'grounding', 'neutralizacion', 'SUCCESS');
+    
+    console.log(`[FASE 2] Agentes de Fase 1 completados: ${fase1Logs.count}/4`);
+    
+    if (fase1Logs.count < 4) {
+        console.log(`[FASE 2] ❌ Fase 1 incompleta`);
+        return res.status(400).json({ error: 'Fase 1 must be completed before running Fase 2' });
+    }
+    
+    // Obtener resultados de Fase 1 para pasarlos como contexto adicional
+    const fase1Results = db.prepare('SELECT agent_name, result FROM agent_logs WHERE session_id = ? AND agent_name IN (?, ?, ?, ?)')
+        .all(sid, 'ausencias', 'bifurcaciones', 'grounding', 'neutralizacion');
+    
+    console.log(`[FASE 2] Resultados de Fase 1 obtenidos: ${fase1Results.length}`);
+    
+    const fase1Context = fase1Results.map(r => `[${r.agent_name.toUpperCase()}]\n${r.result}`).join('\n\n---\n\n');
+    const fullContext = `${session.thinking}\n\n===== RESULTADOS FASE 1 =====\n\n${fase1Context}`;
+    
+    console.log(`[FASE 2] Contexto preparado. Longitud: ${fullContext.length} caracteres`);
+    console.log(`[FASE 2] Ejecutando agentes: ${WORKSPACES_FASE2.join(', ')}`);
+    
+    res.json({ success: true });
+    WORKSPACES_FASE2.forEach(name => {
+        console.log(`[FASE 2] Iniciando agente: ${name}`);
+        ejecutarAgente(sid, name, fullContext);
+    });
 });
 
 // Función para obtener definición de agente (personalizada o por defecto)
