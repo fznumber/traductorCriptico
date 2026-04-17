@@ -395,9 +395,12 @@ async function ejecutarAgente(sid, name, thinking) {
 app.get('/api/results', (req, res) => {
     const sid = getEffectiveSessionId(req);
     if (!sid) return res.json({});
-    const s = db.prepare('SELECT thinking FROM sessions WHERE id = ?').get(sid);
+    const s = db.prepare('SELECT thinking, input_prompt FROM sessions WHERE id = ?').get(sid);
     const logs = db.prepare('SELECT agent_name, result FROM agent_logs WHERE session_id = ?').all(sid);
-    const resObj = { thinking: s?.thinking || "[ESPERANDO THINKING...]" };
+    const resObj = { 
+        thinking: s?.thinking || "[ESPERANDO THINKING...]",
+        input_prompt: s?.input_prompt || ""
+    };
     WORKSPACES.forEach(a => resObj[a] = "[ANALIZANDO...]");
     logs.forEach(l => resObj[l.agent_name] = l.result);
     res.json(resObj);

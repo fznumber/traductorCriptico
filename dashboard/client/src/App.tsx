@@ -16,6 +16,7 @@ function App() {
   // Gestión de sesiones
   const [sessions, setSessions] = useState<any[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
+  const [currentSessionPrompt, setCurrentSessionPrompt] = useState<string>('');
   const [showSessionPanel, setShowSessionPanel] = useState(false);
 
   // Gestión de configuración de agentes
@@ -30,6 +31,7 @@ function App() {
   const [log, setLog] = useState('');
   const [results, setResults] = useState<any>({});
   const [activeTab, setActiveTab] = useState('thinking');
+  const [activeFase, setActiveFase] = useState<number | null>(null); // null, 1, 2, 3
   const [grafoUrl, setGrafoUrl] = useState<string | null>(null);
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [musicPrompt, setMusicPrompt] = useState<string | null>(null);
@@ -148,6 +150,11 @@ function App() {
       });
       const data = await res.json();
       setResults(data);
+      
+      // Establecer el prompt de la sesión actual
+      if (data.input_prompt) {
+        setCurrentSessionPrompt(data.input_prompt);
+      }
       
       const uiRes = await fetch(`${API_BASE}/ui-state?sessionId=${sessionId}`, {
         headers: { 'x-user-name': username }
@@ -632,6 +639,9 @@ function App() {
     setLog(`>> Iniciando proceso crítico para: "${prompt}"\n`);
     setResults({ thinking: 'Generando...' });
     setActiveTab('thinking');
+    
+    // Actualizar el prompt de la sesión actual
+    setCurrentSessionPrompt(prompt);
 
     try {
       addLog('>> Solicitando Thinking (segundo plano)...');
@@ -957,6 +967,15 @@ function App() {
           </div>
         </div>
       </header>
+
+      {/* CONSULTA ACTUAL DE LA SESIÓN */}
+      {currentSessionId && currentSessionPrompt && (
+        <div className="current-query-banner">
+          <div className="query-label">CONSULTA ACTUAL</div>
+          <div className="query-text">{currentSessionPrompt}</div>
+          <div className="query-session-id">Sesión #{currentSessionId}</div>
+        </div>
+      )}
 
       {/* PANEL DE SESIONES */}
       {showSessionPanel && (
@@ -1284,61 +1303,121 @@ function App() {
 
           <section className="results">
             <div className="tabs">
-              {['thinking', 'ausencias', 'bifurcaciones', 'grounding', 'neutralizacion', 'rag_dirigido', 'procedencia_marcos', 'cambio_semantico', 'patrones_contrastivos', 'grafo'].map(tab => (
+              {/* Pestaña THINKING */}
+              <button
+                className={activeTab === 'thinking' ? 'active' : ''}
+                onClick={() => { setActiveTab('thinking'); setActiveFase(null); }}
+              >
+                THINKING
+              </button>
+
+              {/* Pestaña FASE 1 con dropdown */}
+              <div className="tab-group">
                 <button
-                  key={tab}
-                  className={activeTab === tab ? 'active' : ''}
-                  onClick={() => setActiveTab(tab)}
-                  disabled={tab === 'grafo' && !grafoUrl}
-                  title={
-                    tab === 'rag_dirigido' ? 'Fase 2: RAG Dirigido' :
-                    tab === 'procedencia_marcos' ? 'Fase 2: Procedencia de Marcos' :
-                    tab === 'cambio_semantico' ? 'Fase 2: Cambio Semántico' :
-                    tab === 'patrones_contrastivos' ? 'Fase 2: Patrones Contrastivos' :
-                    tab.toUpperCase()
-                  }
+                  className={activeFase === 1 ? 'active' : ''}
+                  onClick={() => {
+                    if (activeFase === 1) {
+                      setActiveFase(null);
+                    } else {
+                      setActiveFase(1);
+                      setActiveTab('ausencias');
+                    }
+                  }}
                 >
-                  {tab === 'rag_dirigido' ? 'RAG' :
-                   tab === 'procedencia_marcos' ? 'PROCEDENCIA' :
-                   tab === 'cambio_semantico' ? 'SEMÁNTICA' :
-                   tab === 'patrones_contrastivos' ? 'PATRONES' :
-                   tab.toUpperCase()}
+                  FASE 1 {activeFase === 1 ? '▲' : '▼'}
                 </button>
-              ))}
+                {/* Mostrar agente activo de Fase 1 */}
+                {['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'].includes(activeTab) && (
+                  <span className="active-agent-label">→ {activeTab.toUpperCase()}</span>
+                )}
+                {activeFase === 1 && (
+                  <div className="tab-dropdown">
+                    {['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'].map(tab => (
+                      <button
+                        key={tab}
+                        className={activeTab === tab ? 'active' : ''}
+                        onClick={() => {
+                          setActiveTab(tab);
+                          setActiveFase(null); // Cerrar dropdown al seleccionar
+                        }}
+                      >
+                        {tab.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Pestaña FASE 2 con dropdown */}
+              <div className="tab-group">
+                <button
+                  className={activeFase === 2 ? 'active' : ''}
+                  onClick={() => {
+                    if (activeFase === 2) {
+                      setActiveFase(null);
+                    } else {
+                      setActiveFase(2);
+                      setActiveTab('rag_dirigido');
+                    }
+                  }}
+                >
+                  FASE 2 {activeFase === 2 ? '▲' : '▼'}
+                </button>
+                {/* Mostrar agente activo de Fase 2 */}
+                {['rag_dirigido', 'procedencia_marcos', 'cambio_semantico', 'patrones_contrastivos'].includes(activeTab) && (
+                  <span className="active-agent-label">
+                    → {
+                      activeTab === 'rag_dirigido' ? 'RAG DIRIGIDO' :
+                      activeTab === 'procedencia_marcos' ? 'PROCEDENCIA' :
+                      activeTab === 'cambio_semantico' ? 'SEMÁNTICA' :
+                      activeTab === 'patrones_contrastivos' ? 'PATRONES' : ''
+                    }
+                  </span>
+                )}
+                {activeFase === 2 && (
+                  <div className="tab-dropdown">
+                    {[
+                      { key: 'rag_dirigido', label: 'RAG DIRIGIDO' },
+                      { key: 'procedencia_marcos', label: 'PROCEDENCIA' },
+                      { key: 'cambio_semantico', label: 'SEMÁNTICA' },
+                      { key: 'patrones_contrastivos', label: 'PATRONES' }
+                    ].map(tab => (
+                      <button
+                        key={tab.key}
+                        className={activeTab === tab.key ? 'active' : ''}
+                        onClick={() => {
+                          setActiveTab(tab.key);
+                          setActiveFase(null); // Cerrar dropdown al seleccionar
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="content-viewer">
-              {activeTab === 'grafo' ? (
-                grafoUrl ? (
-                  <KnowledgeGraph grafoUrl={grafoUrl} />
-                ) : (
-                  <pre style={{ color: '#666' }}>
-                    El grafo de conocimiento se generará al completar el análisis de los 4 agentes.
-                  </pre>
-                )
-              ) : (
-                <>
-                  {activeTab === 'thinking' && results.thinking && results.thinking !== 'Generando...' && (
-                    <div className="thinking-audio-bar">
-                      <button 
-                        onClick={handleSpeakThinking} 
-                        disabled={isThinkingAudioLoading}
-                        className="speak-btn"
-                      >
-                        {isThinkingAudioLoading ? <><Loader className="spin" size={12} /> Procesando...</> : <>🔈 Escuchar Thinking</>}
-                      </button>
-                      {thinkingAudioError && <span className="error-text">{thinkingAudioError}</span>}
-                      {thinkingAudioUrl && (
-                        <audio ref={thinkingAudioRef} controls className="thinking-player" crossOrigin="anonymous">
-                          <source src={thinkingAudioUrl} type="audio/mpeg" />
-                        </audio>
-                      )}
-                    </div>
+              {activeTab === 'thinking' && results.thinking && results.thinking !== 'Generando...' && (
+                <div className="thinking-audio-bar">
+                  <button 
+                    onClick={handleSpeakThinking} 
+                    disabled={isThinkingAudioLoading}
+                    className="speak-btn"
+                  >
+                    {isThinkingAudioLoading ? <><Loader className="spin" size={12} /> Procesando...</> : <>🔈 Escuchar Thinking</>}
+                  </button>
+                  {thinkingAudioError && <span className="error-text">{thinkingAudioError}</span>}
+                  {thinkingAudioUrl && (
+                    <audio ref={thinkingAudioRef} controls className="thinking-player" crossOrigin="anonymous">
+                      <source src={thinkingAudioUrl} type="audio/mpeg" />
+                    </audio>
                   )}
-                  <pre style={{ color: activeTab === 'thinking' ? '#81d4fa' : '#ccc' }}>
-                    {results[activeTab] || 'No hay datos de análisis disponibles para esta fase.'}
-                  </pre>
-                </>
+                </div>
               )}
+              <pre style={{ color: activeTab === 'thinking' ? '#81d4fa' : '#ccc' }}>
+                {results[activeTab] || 'No hay datos de análisis disponibles para esta fase.'}
+              </pre>
             </div>
           </section>
         </div>
@@ -1359,6 +1438,50 @@ function App() {
         .agent-btn:hover:not(:disabled) { background: #4c1d95; color: #c4b5fd; }
         .agent-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .status-badge { font-size: 11px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 2px; display: flex; align-items: center; gap: 6px; color: var(--dim); }
+        
+        /* Current Query Banner */
+        .current-query-banner {
+          background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+          border: 1px solid #334155;
+          border-radius: 4px;
+          padding: 12px 16px;
+          margin-bottom: 15px;
+          display: flex;
+          align-items: center;
+          gap: 15px;
+          flex-shrink: 0;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+        .query-label {
+          font-size: 9px;
+          color: #64748b;
+          letter-spacing: 1.5px;
+          font-weight: bold;
+          white-space: nowrap;
+          padding: 4px 8px;
+          background: #1e293b;
+          border-radius: 2px;
+          border: 1px solid #334155;
+        }
+        .query-text {
+          flex: 1;
+          font-size: 13px;
+          color: #e2e8f0;
+          line-height: 1.5;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .query-session-id {
+          font-size: 10px;
+          color: #60a5fa;
+          font-weight: bold;
+          white-space: nowrap;
+          padding: 4px 10px;
+          background: #1e3a5f;
+          border-radius: 2px;
+          border: 1px solid #3b82f6;
+        }
         
         /* Session Panel */
         .session-panel { 
@@ -1608,9 +1731,49 @@ function App() {
         pre::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
         pre::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
-        .tabs { display: flex; border-bottom: 1px solid var(--border); background: #0d0d0d; flex-shrink: 0; }
-        .tabs button { flex: 1; background: transparent; color: var(--dim); border: none; border-right: 1px solid var(--border); padding: 12px; font-size: 10px; font-weight: bold; cursor: pointer; }
-        .tabs button.active { color: var(--accent); background: var(--panel); }
+        .tabs { display: flex; border-bottom: 1px solid var(--border); background: #0d0d0d; flex-shrink: 0; position: relative; }
+        .tabs > button { flex: 1; background: transparent; color: var(--dim); border: none; border-right: 1px solid var(--border); padding: 12px; font-size: 10px; font-weight: bold; cursor: pointer; transition: all 0.2s; }
+        .tabs > button.active { color: var(--accent); background: var(--panel); }
+        .tabs > button:disabled { opacity: 0.3; cursor: not-allowed; }
+        
+        .tab-group { position: relative; flex: 1; }
+        .tab-group > button { width: 100%; background: transparent; color: var(--dim); border: none; border-right: 1px solid var(--border); padding: 12px; font-size: 10px; font-weight: bold; cursor: pointer; transition: all 0.2s; }
+        .tab-group > button.active { color: var(--accent); background: var(--panel); }
+        
+        .active-agent-label {
+          position: absolute;
+          top: 50%;
+          right: 10px;
+          transform: translateY(-50%);
+          font-size: 9px;
+          color: var(--accent);
+          font-weight: bold;
+          letter-spacing: 0.5px;
+          background: rgba(0, 255, 65, 0.1);
+          padding: 3px 8px;
+          border-radius: 2px;
+          border: 1px solid rgba(0, 255, 65, 0.3);
+          pointer-events: none;
+          white-space: nowrap;
+          z-index: 50;
+        }
+        
+        .tab-dropdown { 
+          position: absolute; top: 100%; left: 0; right: 0; 
+          background: #0a0a0a; border: 1px solid var(--border); border-top: none;
+          display: flex; flex-direction: column; z-index: 100;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .tab-dropdown button { 
+          background: transparent; color: var(--dim); border: none; 
+          border-bottom: 1px solid var(--border); padding: 10px 12px; 
+          font-size: 9px; font-weight: bold; cursor: pointer; 
+          text-align: left; transition: all 0.2s;
+        }
+        .tab-dropdown button:last-child { border-bottom: none; }
+        .tab-dropdown button:hover { background: #1a1a1a; color: #fff; }
+        .tab-dropdown button.active { color: var(--accent); background: var(--panel); border-left: 2px solid var(--accent); }
+        
         .content-viewer pre { color: #ccc; flex: 1; }
         .thinking-audio-bar { display: flex; align-items: center; gap: 15px; padding: 10px 20px; background: #0d0d0d; border-bottom: 1px solid var(--border); flex-shrink: 0; }
         .speak-btn { background: #1f2937; color: #e5e7eb; border: 1px solid #374151; padding: 6px 12px; font-size: 11px; border-radius: 4px; }
