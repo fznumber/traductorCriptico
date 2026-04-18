@@ -1,102 +1,322 @@
-# Traductor Crítico (TC2026) 🦞
+# TC2026 - Sistema de Análisis Crítico de Enunciados Normativos
 
-**TC2026** es una plataforma de auditoría diseñada para analizar la "subjetividad interna" de los Modelos de Lenguaje (LLMs). A diferencia de las herramientas que evalúan la respuesta final, TC2026 se enfoca en el proceso de razonamiento interno (*Thinking*) para detectar sesgos, bifurcaciones narrativas y ausencias estructurales.
+Sistema multiagente para análisis crítico de enunciados normativos en 3 fases, con generación de música ambiente y síntesis de voz.
 
-## 🚀 Características
+## 📋 Requisitos Previos
 
-- **Análisis de Thinking:** Captura y audita el rastro de pensamiento de los LLMs antes de generar la respuesta final.
-- **Arquitectura Multitarea:** Emplea 4 agentes especializados (Bifurcaciones, Grounding, Neutralización y Ausencias).
-- **Grafos de Conocimiento:** Visualización interactiva con D3.js que muestra las relaciones entre hallazgos de los agentes.
-- **Inferencia Local:** Configurado para funcionar con **Ollama** (`qwen3.5:4b`) garantizando privacidad y soberanía técnica.
-- **Dashboard Visual:** Interfaz moderna en React para orquestar el pipeline y visualizar resultados en tiempo real.
+- **Node.js** v18 o superior
+- **Python** 3.8 o superior (para Ollama/uvx)
+- **Ollama** instalado y corriendo (para thinking local)
+- **API Keys**:
+  - Anthropic (Claude) - Para agentes
+  - ElevenLabs - Para música y voz
+  - NVIDIA (opcional) - Para thinking alternativo
 
-## 🛠️ Stack Tecnológico
+## 🚀 Instalación Inicial
 
-- **IA:** [Ollama](https://ollama.com/) (Modelo `qwen3.5:4b`)
-- **Frontend:** React + TypeScript + Vite + D3.js
-- **Backend:** Node.js (Express)
-- **Orquestación:** Scripts Bash + `curl`/`jq` para comunicación con la API de Ollama.
-
-## 📂 Estructura del Proyecto
-
-```text
-├── dashboard/              # Interfaz web (Client & Server)
-│   ├── client/
-│   │   └── src/
-│   │       ├── App.tsx           # Componente principal
-│   │       └── KnowledgeGraph.tsx # Visualización de grafos
-│   └── server/
-│       └── server.js       # API REST
-├── workspaces/             # Entornos de los 4 agentes de análisis
-│   ├── ausencias/
-│   ├── bifurcaciones/
-│   ├── grounding/
-│   └── neutralizacion/
-├── prompts/                # Directivas maestras para cada análisis
-├── ejecutar_fase1.sh       # Script principal de orquestación
-├── setup_grafos.sh         # Script de instalación del sistema de grafos
-├── grafo.json              # Grafo consolidado (generado automáticamente)
-├── thinking.txt            # Buffer del proceso de pensamiento actual
-└── ANALISIS_GRAFOS_CONOCIMIENTO.md  # Documentación del sistema de grafos
+### 1. Clonar el repositorio
+```bash
+git clone <tu-repositorio>
+cd <nombre-proyecto>
 ```
 
-## ⚙️ Instalación y Configuración
-
-### 1. Requisitos
-- **Ollama** instalado y corriendo.
-- Modelo `qwen3.5:4b` descargado: `ollama pull qwen3.5:4b`.
-- **Node.js** y **npm** instalados.
-- **jq** instalado (para procesamiento de JSON): `sudo apt-get install jq` (Linux) o `brew install jq` (macOS).
-
-### 2. Instalación Rápida (Sistema de Grafos incluido)
+### 2. Instalar Ollama (si usarás thinking local)
 ```bash
-bash setup_grafos.sh
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# macOS
+brew install ollama
+
+# Windows
+# Descargar desde https://ollama.com/download
 ```
 
-Este script instalará todas las dependencias necesarias, incluyendo D3.js para la visualización de grafos.
-
-### 3. Configuración Manual
-
-#### Backend
+### 3. Descargar modelo de Ollama
 ```bash
-cd dashboard
+ollama pull qwen3.5:4b
+```
+
+### 4. Configurar variables de entorno
+
+Copia el archivo de ejemplo:
+```bash
+cp .env.example .env
+```
+
+Edita `.env` con tus API keys:
+```bash
+# THINKING PROVIDER
+THINKING_PROVIDER=ollama  # o 'nvidia'
+
+# OLLAMA (si usas thinking local)
+OLLAMA_URL=http://localhost:11434/v1/chat/completions
+OLLAMA_MODEL=qwen3.5:4b
+
+# ANTHROPIC (requerido para agentes)
+ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxx
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+
+# NVIDIA (opcional, solo si THINKING_PROVIDER=nvidia)
+NVIDIA_API_KEY=nvapi-xxxxxxxxxxxxx
+NVIDIA_MODEL=deepseek-ai/deepseek-v3.2
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+
+# ELEVENLABS (requerido para música y voz)
+ELEVENLABS_API_KEY=xxxxxxxxxxxxx
+ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL
+```
+
+### 5. Instalar dependencias del backend
+```bash
+cd dashboard/server
 npm install
-npm start
 ```
 
-#### Frontend
+### 6. Instalar dependencias del frontend
+```bash
+cd ../client
+npm install
+```
+
+### 7. Inicializar base de datos
+
+La base de datos SQLite se crea automáticamente al iniciar el servidor por primera vez.
+
+## ▶️ Ejecutar el Proyecto
+
+### Opción 1: Ejecutar manualmente (desarrollo)
+
+**Terminal 1 - Backend:**
+```bash
+cd dashboard/server
+node server.js
+```
+
+**Terminal 2 - Frontend:**
 ```bash
 cd dashboard/client
-npm install
 npm run dev
 ```
 
-## 🖥️ Uso
+### Opción 2: Script de inicio (producción)
 
-1. Abre el Dashboard en tu navegador (por defecto: `http://localhost:5173`).
-2. Introduce un enunciado normativo o pregunta crítica.
-3. El sistema generará el *Thinking* inicial usando Ollama.
-4. El script `ejecutar_fase1.sh` se activará automáticamente, enviando el texto a los 4 agentes de análisis.
-5. Los resultados aparecerán en el Dashboard:
-   - **Pestañas individuales:** Análisis de cada agente en Markdown
-   - **Pestaña GRAFO:** Visualización interactiva de las relaciones entre hallazgos
-6. Los resultados se guardan en:
-   - `workspaces/*/RESULTADO_FASE1.md` (análisis individuales)
-   - `grafo.json` (grafo consolidado)
+Crear un script `start.sh`:
+```bash
+#!/bin/bash
 
-### Interacción con el Grafo
+# Iniciar Ollama (si no está corriendo)
+ollama serve &
 
-- **Zoom:** Rueda del mouse o pinch
-- **Pan:** Click y arrastrar en el fondo
-- **Mover nodos:** Arrastrar nodos individuales
-- **Ver detalles:** Click en cualquier nodo para ver información completa
-- **Colores:** Cada agente tiene un color distintivo (Bifurcaciones: naranja, Grounding: verde, Neutralización: rojo, Ausencias: púrpura)
-- **Certeza:** El tamaño de los nodos y el estilo de las líneas indican el nivel de certeza (alta/media/baja)
+# Iniciar backend
+cd dashboard/server
+node server.js &
 
-Para más información sobre el sistema de grafos, consulta [ANALISIS_GRAFOS_CONOCIMIENTO.md](ANALISIS_GRAFOS_CONOCIMIENTO.md).
+# Iniciar frontend
+cd ../client
+npm run dev
+```
 
-## 🧠 Filosofía
-El *Thinking* de un LLM no es solo una ayuda para el razonamiento; es un documento de **auto-revelación involuntaria**. TC2026 "hackea" la narrativa de objetividad de los modelos para exponer las tensiones políticas y las decisiones ideológicas que ocurren milisegundos antes de que el modelo emita su respuesta "neutral".
+Dar permisos y ejecutar:
+```bash
+chmod +x start.sh
+./start.sh
+```
 
----
-*Proyecto desarrollado para la auditoría crítica de sistemas de IA.*
+## 🌐 Acceder a la Aplicación
+
+Una vez iniciado, abre tu navegador en:
+```
+http://localhost:5173
+```
+
+El backend corre en:
+```
+http://localhost:3001
+```
+
+## 👤 Primer Uso
+
+1. **Seleccionar usuario**: Al abrir la aplicación, selecciona o crea un usuario (Diego, Claudia, Ariel, Invitado)
+
+2. **Configurar audio** (opcional):
+   - Abre el panel de configuración (icono de engranaje)
+   - Configura dispositivos de salida de audio
+   - Personaliza el template de música
+
+3. **Ejecutar primer análisis**:
+   - Escribe un enunciado normativo (ej: "El Estado garantiza la seguridad ciudadana")
+   - Haz click en "ANALIZAR"
+   - Espera a que se complete la Fase 1
+   - Opcionalmente ejecuta Fase 2 y Fase 3
+
+## 📁 Estructura del Proyecto
+
+```
+.
+├── dashboard/
+│   ├── server/              # Backend (Node.js + Express)
+│   │   ├── server.js        # Servidor principal
+│   │   ├── db.js            # Configuración de base de datos
+│   │   ├── tc2026.db        # Base de datos SQLite (se crea automáticamente)
+│   │   └── package.json
+│   └── client/              # Frontend (React + TypeScript + Vite)
+│       ├── src/
+│       │   └── App.tsx      # Componente principal
+│       ├── public/
+│       │   └── audio/       # Archivos de audio generados
+│       └── package.json
+├── workspaces/              # Definiciones de agentes
+│   ├── ausencias/
+│   ├── bifurcaciones/
+│   ├── grounding/
+│   ├── neutralizacion/
+│   ├── rag_dirigido/
+│   ├── procedencia_marcos/
+│   ├── cambio_semantico/
+│   ├── patrones_contrastivos/
+│   ├── fuentes_activadas/
+│   ├── opacidad_residual/
+│   ├── sensibilidad_contextual/
+│   └── vigencia_provisional/
+├── .env                     # Variables de entorno (crear desde .env.example)
+├── .env.example             # Plantilla de variables de entorno
+└── README.md                # Este archivo
+```
+
+## 🔧 Configuración Avanzada
+
+### Cambiar Provider de Thinking
+
+En `.env`:
+```bash
+# Usar Ollama (local, gratis)
+THINKING_PROVIDER=ollama
+
+# O usar NVIDIA (cloud, requiere API key)
+THINKING_PROVIDER=nvidia
+```
+
+### Cambiar Voz de Text-to-Speech
+
+Encuentra voces en: https://elevenlabs.io/voice-library
+
+En `.env`:
+```bash
+ELEVENLABS_VOICE_ID=tu_voice_id_aqui
+```
+
+### Personalizar Agentes
+
+1. Ve al panel de configuración (icono de engranaje)
+2. Haz click en "Ver" junto al agente que quieres personalizar
+3. Edita las instrucciones
+4. Guarda los cambios
+
+Las personalizaciones se guardan por sesión.
+
+## 🗄️ Base de Datos
+
+La base de datos SQLite (`tc2026.db`) contiene:
+
+- **users**: Usuarios del sistema
+- **sessions**: Sesiones de análisis
+- **agent_logs**: Resultados de agentes
+- **audio_config**: Configuración de audio por sesión
+- **agent_definitions**: Definiciones personalizadas de agentes
+- **default_agent_definitions**: Definiciones por defecto
+
+### Resetear Base de Datos
+
+Si necesitas empezar desde cero:
+```bash
+cd dashboard/server
+rm tc2026.db
+node server.js  # Se creará nueva BD automáticamente
+```
+
+## 🐛 Solución de Problemas
+
+### Error: "API Key missing"
+- Verifica que `.env` existe y tiene las API keys correctas
+- Reinicia el servidor después de editar `.env`
+
+### Error: "Ollama connection refused"
+- Verifica que Ollama está corriendo: `ollama serve`
+- Verifica la URL en `.env`: `OLLAMA_URL=http://localhost:11434/v1/chat/completions`
+
+### Error: "Port 3001 already in use"
+- Detén el proceso anterior: `pkill -f "node server.js"`
+- O cambia el puerto en `server.js`
+
+### No se genera música
+- Verifica que `ELEVENLABS_API_KEY` es válida
+- Verifica que tienes créditos en tu cuenta de ElevenLabs
+- Revisa los logs del servidor para ver errores específicos
+
+### Agentes no se ejecutan
+- Verifica que `ANTHROPIC_API_KEY` es válida
+- Verifica que el thinking se completó antes de ejecutar Fase 1
+- Revisa los logs del servidor
+
+## 📊 Monitoreo
+
+### Ver logs del servidor
+```bash
+cd dashboard/server
+node server.js
+# Los logs aparecerán en la consola
+```
+
+### Ver logs del frontend
+Abre DevTools del navegador (F12) y ve a la pestaña "Console"
+
+### Ver base de datos
+```bash
+cd dashboard/server
+sqlite3 tc2026.db
+
+# Comandos útiles:
+.tables                    # Ver todas las tablas
+SELECT * FROM sessions;    # Ver sesiones
+SELECT * FROM agent_logs;  # Ver resultados de agentes
+.quit                      # Salir
+```
+
+## 🔐 Seguridad
+
+- **NO** subas el archivo `.env` al repositorio
+- **NO** compartas tus API keys
+- Usa `.gitignore` para excluir archivos sensibles
+- Considera usar variables de entorno del sistema en producción
+
+## 📝 Documentación Adicional
+
+- `ARQUITECTURA_FLUJO_TC2026.md` - Arquitectura del sistema
+- `IMPLEMENTACION_FASE2.md` - Detalles de Fase 2
+- `IMPLEMENTACION_FASE3.md` - Detalles de Fase 3
+- `CORRECCION_SESIONES_REUTILIZACION.md` - Manejo de sesiones
+- `IMPLEMENTACION_SPEAK_THINKING.md` - Text-to-Speech
+- `DEBUG_TEMPLATE_MUSICA.md` - Debug de música
+
+## 🤝 Contribuir
+
+1. Crea una rama para tu feature: `git checkout -b feature/nueva-funcionalidad`
+2. Haz commit de tus cambios: `git commit -am 'Agregar nueva funcionalidad'`
+3. Push a la rama: `git push origin feature/nueva-funcionalidad`
+4. Crea un Pull Request
+
+## 📄 Licencia
+
+[Especificar licencia]
+
+## 👥 Autores
+
+[Especificar autores]
+
+## 🙏 Agradecimientos
+
+- Anthropic (Claude API)
+- ElevenLabs (Audio API)
+- Ollama (Local LLM)
+- NVIDIA (Cloud LLM)

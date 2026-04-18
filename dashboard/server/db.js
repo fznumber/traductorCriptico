@@ -712,8 +712,16 @@ Reglas para el JSON:
 - El JSON debe ser válido y parseable. No agregues comentarios dentro del JSON.`
 };
 
+// Definiciones por defecto de agentes de Fase 3
+const defaultDefinitionsFase3 = {
+    'fuentes_activadas': fs.readFileSync(path.resolve(__dirname, '../../workspaces/fuentes_activadas/IDENTITY.md'), 'utf8'),
+    'opacidad_residual': fs.readFileSync(path.resolve(__dirname, '../../workspaces/opacidad_residual/IDENTITY.md'), 'utf8'),
+    'sensibilidad_contextual': fs.readFileSync(path.resolve(__dirname, '../../workspaces/sensibilidad_contextual/IDENTITY.md'), 'utf8'),
+    'vigencia_provisional': fs.readFileSync(path.resolve(__dirname, '../../workspaces/vigencia_provisional/IDENTITY.md'), 'utf8')
+};
+
 // Combinar todas las definiciones
-const allDefaultDefinitions = { ...defaultDefinitions, ...defaultDefinitionsFase2 };
+const allDefaultDefinitions = { ...defaultDefinitions, ...defaultDefinitionsFase2, ...defaultDefinitionsFase3 };
 
 // Insertar definiciones por defecto si no existen
 const insertDefault = db.prepare('INSERT OR IGNORE INTO default_agent_definitions (agent_name, definition) VALUES (?, ?)');

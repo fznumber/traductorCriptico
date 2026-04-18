@@ -20,7 +20,8 @@ app.use(bodyParser.json({ limit: '50mb' }));
 const ROOT_PATH = path.resolve(__dirname, '../../');
 const WORKSPACES_FASE1 = ['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'];
 const WORKSPACES_FASE2 = ['rag_dirigido', 'procedencia_marcos', 'cambio_semantico', 'patrones_contrastivos'];
-const WORKSPACES = [...WORKSPACES_FASE1, ...WORKSPACES_FASE2];
+const WORKSPACES_FASE3 = ['fuentes_activadas', 'opacidad_residual', 'sensibilidad_contextual', 'vigencia_provisional'];
+const WORKSPACES = [...WORKSPACES_FASE1, ...WORKSPACES_FASE2, ...WORKSPACES_FASE3];
 
 // --- HELPERS ---
 const getUserIdFromHeaders = (req) => {
@@ -159,6 +160,9 @@ app.post('/api/audio-config', (req, res) => {
     
     const { music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume, music_instruction_template } = req.body;
     
+    console.log(`[POST AUDIO CONFIG] Sesión ${sid}`);
+    console.log(`[POST AUDIO CONFIG] Template recibido: "${music_instruction_template}"`);
+    
     // Verificar si ya existe configuración para esta sesión
     const existing = db.prepare('SELECT id FROM audio_config WHERE session_id = ?').get(sid);
     
@@ -179,6 +183,7 @@ app.post('/api/audio-config', (req, res) => {
         values.push(sid);
         
         db.prepare(`UPDATE audio_config SET ${updates.join(', ')} WHERE session_id = ?`).run(...values);
+        console.log(`[POST AUDIO CONFIG] ✅ Actualizado registro existente`);
     } else {
         // Insertar
         db.prepare(`
@@ -187,7 +192,12 @@ app.post('/api/audio-config', (req, res) => {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).run(sid, music_device_id, music_pan, music_volume, effects_device_id, effects_pan, effects_volume, 
                music_instruction_template || 'Cinematic dark ambient for: {prompt}');
+        console.log(`[POST AUDIO CONFIG] ✅ Creado nuevo registro`);
     }
+    
+    // Verificar que se guardó correctamente
+    const saved = db.prepare('SELECT music_instruction_template FROM audio_config WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1').get(sid);
+    console.log(`[POST AUDIO CONFIG] Template guardado en BD: "${saved?.music_instruction_template}"`);
     
     res.json({ success: true });
 });
@@ -271,27 +281,146 @@ app.post('/api/generate-music', async (req, res) => {
     }
 });
 
+app.post('/api/speak-thinking', async (req, res) => {
+    const { text } = req.body;
+    const sid = getEffectiveSessionId(req);
+    const API_KEY = process.env.ELEVENLABS_API_KEY;
+    
+    if (!API_KEY || API_KEY.includes('tu_')) {
+        return res.json({ success: false, error: 'API Key de ElevenLabs no configurada' });
+    }
+    
+    if (!text) {
+        return res.json({ success: false, error: 'No se proporcionó texto' });
+    }
+
+    try {
+        console.log(`[TTS] Generando voz para thinking (sesión ${sid})`);
+        
+        // Obtener voice_id de la configuración de audio o usar uno por defecto
+        const audioConfig = db.prepare('SELECT voice_id FROM audio_config WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1').get(sid);
+        const voiceId = audioConfig?.voice_id || process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL'; // Sarah (voz femenina en español)
+        
+        console.log(`[TTS] Usando voice_id: ${voiceId}`);
+        
+        // Limpiar el texto (remover tags XML si existen)
+        const cleanText = text.replace(/<think>|<\/think>/g, '').trim();
+        
+        // Limitar longitud del texto (ElevenLabs tiene límites)
+        const maxLength = 5000;
+        const textToSpeak = cleanText.length > maxLength 
+            ? cleanText.substring(0, maxLength) + '...' 
+            : cleanText;
+        
+        console.log(`[TTS] Longitud del texto: ${textToSpeak.length} caracteres`);
+        
+        const elRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+            method: 'POST',
+            headers: { 
+                'xi-api-key': API_KEY, 
+                'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({ 
+                text: textToSpeak,
+                model_id: 'eleven_multilingual_v2',
+                voice_settings: {
+                    stability: 0.5,
+                    similarity_boost: 0.75
+                }
+            })
+        });
+        
+        if (!elRes.ok) {
+            const errorText = await elRes.text();
+            console.error(`[TTS] Error de ElevenLabs: ${elRes.status} - ${errorText}`);
+            throw new Error(`ElevenLabs TTS error: ${elRes.status}`);
+        }
+        
+        const fileName = `thinking_${Date.now()}.mp3`;
+        const audioDir = path.join(ROOT_PATH, 'dashboard/client/public/audio');
+        if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
+        
+        const destStream = fs.createWriteStream(path.join(audioDir, fileName));
+        
+        destStream.on('error', (err) => {
+            console.error(`[TTS] Error escribiendo archivo: ${err.message}`);
+            if (!res.headersSent) {
+                res.json({ success: false, error: 'Error guardando archivo de audio' });
+            }
+        });
+        
+        destStream.on('finish', () => {
+            console.log(`[TTS] ✅ Archivo guardado: ${fileName}`);
+            if (!res.headersSent) {
+                res.json({ success: true, audioUrl: `/audio/${fileName}` });
+            }
+        });
+        
+        elRes.body.pipe(destStream);
+        
+    } catch (err) { 
+        console.error(`[TTS] Error general: ${err.message}`);
+        if (!res.headersSent) {
+            res.json({ success: false, error: err.message }); 
+        }
+    }
+});
+
 app.post('/api/generate-thinking', async (req, res) => {
-    const { prompt } = req.body;
+    const { prompt, sessionId } = req.body;
     const uid = getUserIdFromHeaders(req);
-    const sid = db.prepare('INSERT INTO sessions (user_id, input_prompt) VALUES (?, ?)').run(uid, prompt).lastInsertRowid;
+    
+    let sid;
+    if (sessionId) {
+        // Reutilizar sesión existente y actualizar el prompt
+        console.log(`[THINKING] Reutilizando sesión ${sessionId} para nuevo análisis`);
+        
+        // Limpiar resultados de agentes anteriores
+        db.prepare('DELETE FROM agent_logs WHERE session_id = ?').run(sessionId);
+        console.log(`[THINKING] Limpiados resultados de agentes anteriores de sesión ${sessionId}`);
+        
+        // Actualizar prompt y limpiar thinking anterior
+        db.prepare('UPDATE sessions SET input_prompt = ?, thinking = NULL WHERE id = ?').run(prompt, sessionId);
+        sid = sessionId;
+    } else {
+        // Crear nueva sesión
+        console.log(`[THINKING] Creando nueva sesión para análisis`);
+        sid = db.prepare('INSERT INTO sessions (user_id, input_prompt) VALUES (?, ?)').run(uid, prompt).lastInsertRowid;
+    }
     
     res.json({ success: true, sessionId: sid });
 
     (async () => {
         try {
-            // FORZAR OLLAMA PARA EL THINKING
-            const url = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
-            const body = { model: process.env.OLLAMA_MODEL || 'qwen3.5:4b', messages: [{ role: 'user', content: prompt }], stream: false };
-            const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            // THINKING puede usar OLLAMA o NVIDIA (no Anthropic)
+            const THINKING_PROVIDER = process.env.THINKING_PROVIDER || 'ollama';
+            let url, model, headers, body;
+            
+            if (THINKING_PROVIDER === 'nvidia') {
+                url = process.env.NVIDIA_BASE_URL + '/chat/completions' || 'https://integrate.api.nvidia.com/v1/chat/completions';
+                model = process.env.NVIDIA_MODEL || 'deepseek-ai/deepseek-v3.2';
+                headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.NVIDIA_API_KEY}` };
+                body = { model, messages: [{ role: 'user', content: prompt }], temperature: 0.2, top_p: 0.7, max_tokens: 4096, stream: false };
+            } else {
+                // Default: Ollama
+                url = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
+                model = process.env.OLLAMA_MODEL || 'qwen3.5:4b';
+                headers = { 'Content-Type': 'application/json' };
+                body = { model, messages: [{ role: 'user', content: prompt }], stream: false };
+            }
+            
+            const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
             const d = await r.json();
             let think = d.choices?.[0]?.message?.content || "";
+            
             if (think) {
                 const formatted = think.includes('<think>') ? think : `<think>\n${think}\n</think>`;
                 db.prepare('UPDATE sessions SET thinking = ? WHERE id = ?').run(formatted, sid);
-                console.log(`[OK] Thinking Sesión ${sid}`);
+                console.log(`[OK] Thinking Sesión ${sid} (Provider: ${THINKING_PROVIDER}, Model: ${model})`);
             }
-        } catch (e) { console.error('Thinking Error:', e); }
+        } catch (e) { 
+            console.error('Thinking Error:', e); 
+        }
     })();
 });
 
@@ -344,6 +473,50 @@ app.post('/api/run-phase-2', (req, res) => {
     });
 });
 
+app.post('/api/run-phase-3', (req, res) => {
+    const sid = getEffectiveSessionId(req);
+    console.log(`[FASE 3] Sesión: ${sid}`);
+    
+    const session = db.prepare('SELECT thinking FROM sessions WHERE id = ?').get(sid);
+    if (!session?.thinking) {
+        console.log(`[FASE 3] ❌ No hay thinking para sesión ${sid}`);
+        return res.status(400).json({ error: 'Thinking not ready' });
+    }
+    
+    // Verificar que Fase 2 esté completa
+    const fase2Logs = db.prepare('SELECT COUNT(*) as count FROM agent_logs WHERE session_id = ? AND agent_name IN (?, ?, ?, ?) AND status = ?')
+        .get(sid, 'rag_dirigido', 'procedencia_marcos', 'cambio_semantico', 'patrones_contrastivos', 'SUCCESS');
+    
+    console.log(`[FASE 3] Agentes de Fase 2 completados: ${fase2Logs.count}/4`);
+    
+    if (fase2Logs.count < 4) {
+        console.log(`[FASE 3] ❌ Fase 2 incompleta`);
+        return res.status(400).json({ error: 'Fase 2 must be completed before running Fase 3' });
+    }
+    
+    // Obtener resultados de Fase 1 y Fase 2 para pasarlos como contexto
+    const fase1Results = db.prepare('SELECT agent_name, result FROM agent_logs WHERE session_id = ? AND agent_name IN (?, ?, ?, ?)')
+        .all(sid, 'ausencias', 'bifurcaciones', 'grounding', 'neutralizacion');
+    
+    const fase2Results = db.prepare('SELECT agent_name, result FROM agent_logs WHERE session_id = ? AND agent_name IN (?, ?, ?, ?)')
+        .all(sid, 'rag_dirigido', 'procedencia_marcos', 'cambio_semantico', 'patrones_contrastivos');
+    
+    console.log(`[FASE 3] Resultados de Fase 1: ${fase1Results.length}, Fase 2: ${fase2Results.length}`);
+    
+    const fase1Context = fase1Results.map(r => `[${r.agent_name.toUpperCase()}]\n${r.result}`).join('\n\n---\n\n');
+    const fase2Context = fase2Results.map(r => `[${r.agent_name.toUpperCase()}]\n${r.result}`).join('\n\n---\n\n');
+    const fullContext = `${session.thinking}\n\n===== RESULTADOS FASE 1 =====\n\n${fase1Context}\n\n===== RESULTADOS FASE 2 =====\n\n${fase2Context}`;
+    
+    console.log(`[FASE 3] Contexto preparado. Longitud: ${fullContext.length} caracteres`);
+    console.log(`[FASE 3] Ejecutando agentes: ${WORKSPACES_FASE3.join(', ')}`);
+    
+    res.json({ success: true });
+    WORKSPACES_FASE3.forEach(name => {
+        console.log(`[FASE 3] Iniciando agente: ${name}`);
+        ejecutarAgente(sid, name, fullContext);
+    });
+});
+
 // Función para obtener definición de agente (personalizada o por defecto)
 function getAgentDefinition(sessionId, agentName) {
     // Intentar obtener definición personalizada de la sesión
@@ -361,34 +534,30 @@ function getAgentDefinition(sessionId, agentName) {
 
 async function ejecutarAgente(sid, name, thinking) {
     const start = Date.now();
-    const PROVIDER = process.env.LLM_PROVIDER;
+    // FORZAR ANTHROPIC PARA LOS AGENTES
+    const PROVIDER = 'anthropic';
     
     // Obtener definición desde BD (personalizada o por defecto)
     const instructions = getAgentDefinition(sid, name);
     const p = `IDENTIDAD: ${instructions}\n\nANALIZA ESTE RAZONAMIENTO:\n${thinking}`;
 
     try {
-        let url, model, headers, body;
-        if (PROVIDER === 'anthropic') {
-            url = 'https://api.anthropic.com/v1/messages';
-            model = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
-            headers = { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' };
-            body = { model, max_tokens: 4096, messages: [{ role: 'user', content: p }] };
-        } else {
-            url = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
-            model = process.env.OLLAMA_MODEL || 'qwen3.5:4b';
-            headers = { 'Content-Type': 'application/json' };
-            body = { model, messages: [{ role: 'user', content: p }], stream: false };
-        }
+        const url = 'https://api.anthropic.com/v1/messages';
+        const model = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
+        const headers = { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' };
+        const body = { model, max_tokens: 4096, messages: [{ role: 'user', content: p }] };
+        
         const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
         const d = await r.json();
-        const res = (PROVIDER === 'anthropic') ? d.content[0].text : d.choices[0].message.content;
+        const res = d.content[0].text;
+        
         db.prepare('INSERT INTO agent_logs (session_id, agent_name, result, status, duration_ms, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?)')
           .run(sid, name, res, 'SUCCESS', Date.now() - start, PROVIDER, model);
-        console.log(`[OK] Agente ${name} (${sid})`);
+        console.log(`[OK] Agente ${name} (${sid}) - Provider: ${PROVIDER}`);
     } catch (e) {
         db.prepare('INSERT INTO agent_logs (session_id, agent_name, result, status) VALUES (?, ?, ?, ?)')
           .run(sid, name, `Error: ${e.message}`, 'FAILED');
+        console.error(`[ERROR] Agente ${name} (${sid}):`, e.message);
     }
 }
 

@@ -648,7 +648,10 @@ function App() {
       const genRes = await authFetch(`${API_BASE}/generate-thinking`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ 
+          prompt,
+          sessionId: currentSessionId // Enviar sessionId actual si existe
+        })
       });
       const genData = await genRes.json();
       const currentSid = genData.sessionId;
@@ -781,6 +784,70 @@ function App() {
     } catch (err: any) {
       addLog(`>> ❌ Error ejecutando Fase 2: ${err.message}`);
       setStatus('completed');
+    }
+  };
+
+  const runPhase3 = async () => {
+    if (!currentSessionId) return;
+    
+    setStatus('processing-phase3');
+    addLog('>> Iniciando Fase 3 - Exposición de la Fragilidad...');
+    
+    try {
+      const res = await authFetch(`${API_BASE}/run-phase-3`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: currentSessionId })
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        addLog(`>> ❌ Error: ${data.error}`);
+        setStatus('completed-phase2');
+        return;
+      }
+      
+      addLog('>> Ejecutando agentes de Fase 3...');
+      
+      // Polling de resultados de Fase 3
+      const pollInterval = setInterval(async () => {
+        try {
+          const resRes = await authFetch(`${API_BASE}/results?sessionId=${currentSessionId}`);
+          const data = await resRes.json();
+          setResults((prev: any) => ({ ...prev, ...data }));
+
+          // Verificar si Fase 3 está completa
+          const fase3Agents = ['fuentes_activadas', 'opacidad_residual', 'sensibilidad_contextual', 'vigencia_provisional'];
+          
+          console.log('[FASE 3 POLLING] Estado de agentes:', fase3Agents.map(agent => ({
+            agent,
+            hasData: !!data[agent],
+            value: data[agent]?.substring(0, 50) + '...',
+            isAnalyzing: String(data[agent]).includes('ANALIZANDO'),
+            isWaiting: String(data[agent]).includes('ESPERANDO')
+          })));
+          
+          const fase3Complete = fase3Agents.every(agent => 
+            data[agent] && 
+            !String(data[agent]).includes('ANALIZANDO') && 
+            !String(data[agent]).includes('ESPERANDO')
+          );
+
+          if (fase3Complete) {
+            clearInterval(pollInterval);
+            setStatus('completed-phase3');
+            addLog('>> ✅ Análisis Fase 3 finalizado.');
+            addLog('>> 🎉 Análisis completo de las 3 fases.');
+          }
+        } catch (e) { 
+          console.error('Polling error', e); 
+        }
+      }, 3000);
+      
+    } catch (err: any) {
+      addLog(`>> ❌ Error ejecutando Fase 3: ${err.message}`);
+      setStatus('completed-phase2');
     }
   };
 
@@ -918,7 +985,7 @@ function App() {
     );
   }
 
-  const isRunning = status === 'generating' || status === 'processing' || status === 'processing-phase2';
+  const isRunning = status === 'generating' || status === 'processing' || status === 'processing-phase2' || status === 'processing-phase3';
 
   return (
     <div className="app-container">
@@ -1046,39 +1113,125 @@ function App() {
             <button className="close-btn" onClick={() => setShowAgentConfig(false)}>✕</button>
           </div>
           <div className="agent-list">
-            {['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'].map(agentName => (
-              <div key={agentName} className="agent-item">
-                <div className="agent-header">
-                  <div className="agent-name">
-                    {agentName.toUpperCase()}
-                    {isAgentCustomized(agentName) && (
-                      <span className="customized-badge" title="Personalizado para esta sesión">✎</span>
-                    )}
-                  </div>
-                  <div className="agent-actions">
-                    <button 
-                      className="edit-agent-btn"
-                      onClick={() => openAgentEditor(agentName)}
-                      title="Editar definición"
-                    >
-                      ✏️ Editar
-                    </button>
-                    {isAgentCustomized(agentName) && (
+            {/* FASE 1 */}
+            <div className="agent-phase-section">
+              <div className="phase-title">FASE 1 - Detección de Zonas de Opacidad</div>
+              {['ausencias', 'bifurcaciones', 'grounding', 'neutralizacion'].map(agentName => (
+                <div key={agentName} className="agent-item">
+                  <div className="agent-header">
+                    <div className="agent-name">
+                      {agentName.toUpperCase()}
+                      {isAgentCustomized(agentName) && (
+                        <span className="customized-badge" title="Personalizado para esta sesión">✎</span>
+                      )}
+                    </div>
+                    <div className="agent-actions">
                       <button 
-                        className="reset-agent-btn"
-                        onClick={() => resetAgentDefinition(agentName)}
-                        title="Resetear a definición por defecto"
+                        className="edit-agent-btn"
+                        onClick={() => openAgentEditor(agentName)}
+                        title="Editar definición"
                       >
-                        ↺ Reset
+                        ✏️ Editar
                       </button>
-                    )}
+                      {isAgentCustomized(agentName) && (
+                        <button 
+                          className="reset-agent-btn"
+                          onClick={() => resetAgentDefinition(agentName)}
+                          title="Resetear a definición por defecto"
+                        >
+                          ↺ Reset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="agent-preview">
+                    {(agentDefinitions[agentName] || '').substring(0, 150)}...
                   </div>
                 </div>
-                <div className="agent-preview">
-                  {(agentDefinitions[agentName] || '').substring(0, 150)}...
+              ))}
+            </div>
+
+            {/* FASE 2 */}
+            <div className="agent-phase-section">
+              <div className="phase-title">FASE 2 - Estratos de Interferencia</div>
+              {['rag_dirigido', 'procedencia_marcos', 'cambio_semantico', 'patrones_contrastivos'].map(agentName => (
+                <div key={agentName} className="agent-item">
+                  <div className="agent-header">
+                    <div className="agent-name">
+                      {agentName === 'rag_dirigido' ? 'RAG DIRIGIDO' :
+                       agentName === 'procedencia_marcos' ? 'PROCEDENCIA MARCOS' :
+                       agentName === 'cambio_semantico' ? 'CAMBIO SEMÁNTICO' :
+                       agentName === 'patrones_contrastivos' ? 'PATRONES CONTRASTIVOS' : agentName.toUpperCase()}
+                      {isAgentCustomized(agentName) && (
+                        <span className="customized-badge" title="Personalizado para esta sesión">✎</span>
+                      )}
+                    </div>
+                    <div className="agent-actions">
+                      <button 
+                        className="edit-agent-btn"
+                        onClick={() => openAgentEditor(agentName)}
+                        title="Editar definición"
+                      >
+                        ✏️ Editar
+                      </button>
+                      {isAgentCustomized(agentName) && (
+                        <button 
+                          className="reset-agent-btn"
+                          onClick={() => resetAgentDefinition(agentName)}
+                          title="Resetear a definición por defecto"
+                        >
+                          ↺ Reset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="agent-preview">
+                    {(agentDefinitions[agentName] || '').substring(0, 150)}...
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+
+            {/* FASE 3 */}
+            <div className="agent-phase-section">
+              <div className="phase-title">FASE 3 - Exposición de la Fragilidad</div>
+              {['fuentes_activadas', 'opacidad_residual', 'sensibilidad_contextual', 'vigencia_provisional'].map(agentName => (
+                <div key={agentName} className="agent-item">
+                  <div className="agent-header">
+                    <div className="agent-name">
+                      {agentName === 'fuentes_activadas' ? 'FUENTES ACTIVADAS' :
+                       agentName === 'opacidad_residual' ? 'OPACIDAD RESIDUAL' :
+                       agentName === 'sensibilidad_contextual' ? 'SENSIBILIDAD CONTEXTUAL' :
+                       agentName === 'vigencia_provisional' ? 'VIGENCIA PROVISIONAL' : agentName.toUpperCase()}
+                      {isAgentCustomized(agentName) && (
+                        <span className="customized-badge" title="Personalizado para esta sesión">✎</span>
+                      )}
+                    </div>
+                    <div className="agent-actions">
+                      <button 
+                        className="edit-agent-btn"
+                        onClick={() => openAgentEditor(agentName)}
+                        title="Editar definición"
+                      >
+                        ✏️ Editar
+                      </button>
+                      {isAgentCustomized(agentName) && (
+                        <button 
+                          className="reset-agent-btn"
+                          onClick={() => resetAgentDefinition(agentName)}
+                          title="Resetear a definición por defecto"
+                        >
+                          ↺ Reset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="agent-preview">
+                    {(agentDefinitions[agentName] || '').substring(0, 150)}...
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -1264,6 +1417,17 @@ function App() {
           >
             <Play size={16} /> FASE 2
           </button>
+          <button 
+            onClick={runPhase3} 
+            disabled={status !== 'completed-phase2' || isRecording || isTranscribing}
+            style={{ 
+              background: status === 'completed-phase2' ? '#f59e0b' : '#333',
+              borderColor: status === 'completed-phase2' ? '#fbbf24' : '#555'
+            }}
+            title="Ejecutar Fase 3 - Exposición de la Fragilidad"
+          >
+            <Play size={16} /> FASE 3
+          </button>
         </div>
 
         {/* ── Player de Música ── */}
@@ -1381,6 +1545,55 @@ function App() {
                       { key: 'procedencia_marcos', label: 'PROCEDENCIA' },
                       { key: 'cambio_semantico', label: 'SEMÁNTICA' },
                       { key: 'patrones_contrastivos', label: 'PATRONES' }
+                    ].map(tab => (
+                      <button
+                        key={tab.key}
+                        className={activeTab === tab.key ? 'active' : ''}
+                        onClick={() => {
+                          setActiveTab(tab.key);
+                          setActiveFase(null); // Cerrar dropdown al seleccionar
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Pestaña FASE 3 con dropdown */}
+              <div className="tab-group">
+                <button
+                  className={activeFase === 3 ? 'active' : ''}
+                  onClick={() => {
+                    if (activeFase === 3) {
+                      setActiveFase(null);
+                    } else {
+                      setActiveFase(3);
+                      setActiveTab('fuentes_activadas');
+                    }
+                  }}
+                >
+                  FASE 3 {activeFase === 3 ? '▲' : '▼'}
+                </button>
+                {/* Mostrar agente activo de Fase 3 */}
+                {['fuentes_activadas', 'opacidad_residual', 'sensibilidad_contextual', 'vigencia_provisional'].includes(activeTab) && (
+                  <span className="active-agent-label">
+                    → {
+                      activeTab === 'fuentes_activadas' ? 'FUENTES' :
+                      activeTab === 'opacidad_residual' ? 'OPACIDAD' :
+                      activeTab === 'sensibilidad_contextual' ? 'CONTEXTO' :
+                      activeTab === 'vigencia_provisional' ? 'VIGENCIA' : ''
+                    }
+                  </span>
+                )}
+                {activeFase === 3 && (
+                  <div className="tab-dropdown">
+                    {[
+                      { key: 'fuentes_activadas', label: 'FUENTES' },
+                      { key: 'opacidad_residual', label: 'OPACIDAD' },
+                      { key: 'sensibilidad_contextual', label: 'CONTEXTO' },
+                      { key: 'vigencia_provisional', label: 'VIGENCIA' }
                     ].map(tab => (
                       <button
                         key={tab.key}
@@ -1553,7 +1766,7 @@ function App() {
         /* Agent Config Panel */
         .agent-config-panel {
           background: #0d0d0d; border: 1px solid #a78bfa; border-radius: 4px;
-          margin-bottom: 15px; flex-shrink: 0; max-height: 500px;
+          margin-bottom: 15px; flex-shrink: 0; max-height: 70vh;
           display: flex; flex-direction: column; overflow: hidden;
         }
         .agent-config-header {
@@ -1570,12 +1783,21 @@ function App() {
         }
         .close-btn:hover { background: #333; color: #fff; }
         .agent-list {
-          overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px;
+          overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 15px;
         }
         .agent-list::-webkit-scrollbar { width: 6px; }
         .agent-list::-webkit-scrollbar-track { background: transparent; }
         .agent-list::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
         .agent-list::-webkit-scrollbar-thumb:hover { background: #a78bfa; }
+        .agent-phase-section {
+          display: flex; flex-direction: column; gap: 10px;
+        }
+        .phase-title {
+          font-size: 11px; font-weight: bold; color: #a78bfa;
+          letter-spacing: 1px; padding: 8px 12px;
+          background: #1a1a2e; border-left: 3px solid #a78bfa;
+          border-radius: 2px; margin-bottom: 5px;
+        }
         .agent-item {
           background: #111; border: 1px solid #222; padding: 12px;
           border-radius: 3px; transition: all 0.2s;
