@@ -79,7 +79,7 @@ fi
 # 4. Instalar dependencias del backend
 echo ""
 echo "4. Instalando dependencias del backend..."
-cd dashboard/server
+cd dashboard
 if [ -d "node_modules" ]; then
     print_warning "node_modules ya existe, saltando instalación"
 else
@@ -91,7 +91,15 @@ else
         exit 1
     fi
 fi
-cd ../..
+
+# Crear enlace simbólico para que server/ pueda acceder a node_modules
+if [ ! -L "server/node_modules" ]; then
+    cd server
+    ln -s ../node_modules node_modules
+    cd ..
+    print_success "Enlace simbólico creado en server/"
+fi
+cd ..
 
 # 5. Instalar dependencias del frontend
 echo ""
