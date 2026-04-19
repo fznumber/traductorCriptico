@@ -392,31 +392,52 @@ app.post('/api/generate-thinking', async (req, res) => {
 
     (async () => {
         try {
-            // THINKING puede usar OLLAMA o NVIDIA (no Anthropic)
-            const THINKING_PROVIDER = process.env.THINKING_PROVIDER || 'ollama';
-            let url, model, headers, body;
+            // Usar el mismo provider configurado para todo el proceso
+            const PROVIDER = process.env.LLM_PROVIDER || 'nvidia';
+            let url, model, headers, body, think;
             
-            if (THINKING_PROVIDER === 'nvidia') {
+            if (PROVIDER === 'anthropic') {
+                // Anthropic (Claude)
+                url = 'https://api.anthropic.com/v1/messages';
+                model = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
+                headers = { 
+                    'Content-Type': 'application/json', 
+                    'x-api-key': process.env.ANTHROPIC_API_KEY, 
+                    'anthropic-version': '2023-06-01' 
+                };
+                body = { model, max_tokens: 4096, messages: [{ role: 'user', content: prompt }] };
+                
+                const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+                const d = await r.json();
+                think = d.content[0].text;
+                
+            } else if (PROVIDER === 'nvidia') {
+                // NVIDIA
                 url = process.env.NVIDIA_BASE_URL + '/chat/completions' || 'https://integrate.api.nvidia.com/v1/chat/completions';
                 model = process.env.NVIDIA_MODEL || 'deepseek-ai/deepseek-v3.2';
                 headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.NVIDIA_API_KEY}` };
                 body = { model, messages: [{ role: 'user', content: prompt }], temperature: 0.2, top_p: 0.7, max_tokens: 4096, stream: false };
+                
+                const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+                const d = await r.json();
+                think = d.choices?.[0]?.message?.content || "";
+                
             } else {
-                // Default: Ollama
+                // Ollama (por defecto)
                 url = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
                 model = process.env.OLLAMA_MODEL || 'qwen3.5:4b';
                 headers = { 'Content-Type': 'application/json' };
                 body = { model, messages: [{ role: 'user', content: prompt }], stream: false };
+                
+                const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+                const d = await r.json();
+                think = d.choices?.[0]?.message?.content || "";
             }
-            
-            const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-            const d = await r.json();
-            let think = d.choices?.[0]?.message?.content || "";
             
             if (think) {
                 const formatted = think.includes('<think>') ? think : `<think>\n${think}\n</think>`;
                 db.prepare('UPDATE sessions SET thinking = ? WHERE id = ?').run(formatted, sid);
-                console.log(`[OK] Thinking Sesión ${sid} (Provider: ${THINKING_PROVIDER}, Model: ${model})`);
+                console.log(`[OK] Thinking Sesión ${sid} (Provider: ${PROVIDER}, Model: ${model})`);
             }
         } catch (e) { 
             console.error('Thinking Error:', e); 
@@ -534,26 +555,71 @@ function getAgentDefinition(sessionId, agentName) {
 
 async function ejecutarAgente(sid, name, thinking) {
     const start = Date.now();
-    // FORZAR ANTHROPIC PARA LOS AGENTES
-    const PROVIDER = 'anthropic';
+    // Usar el provider configurado en .env (puede ser nvidia, anthropic u ollama)
+    const PROVIDER = process.env.LLM_PROVIDER || 'nvidia';
     
     // Obtener definición desde BD (personalizada o por defecto)
     const instructions = getAgentDefinition(sid, name);
     const p = `IDENTIDAD: ${instructions}\n\nANALIZA ESTE RAZONAMIENTO:\n${thinking}`;
 
     try {
-        const url = 'https://api.anthropic.com/v1/messages';
-        const model = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
-        const headers = { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' };
-        const body = { model, max_tokens: 4096, messages: [{ role: 'user', content: p }] };
+        let url, model, headers, body, res;
         
-        const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-        const d = await r.json();
-        const res = d.content[0].text;
+        if (PROVIDER === 'anthropic') {
+            // Anthropic (Claude)
+            url = 'https://api.anthropic.com/v1/messages';
+            model = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
+            headers = { 
+                'Content-Type': 'application/json', 
+                'x-api-key': process.env.ANTHROPIC_API_KEY, 
+                'anthropic-version': '2023-06-01' 
+            };
+            body = { model, max_tokens: 4096, messages: [{ role: 'user', content: p }] };
+            
+            const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+            const d = await r.json();
+            res = d.content[0].text;
+            
+        } else if (PROVIDER === 'nvidia') {
+            // NVIDIA
+            url = process.env.NVIDIA_BASE_URL + '/chat/completions' || 'https://integrate.api.nvidia.com/v1/chat/completions';
+            model = process.env.NVIDIA_MODEL || 'deepseek-ai/deepseek-v3.2';
+            headers = { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${process.env.NVIDIA_API_KEY}` 
+            };
+            body = { 
+                model, 
+                messages: [{ role: 'user', content: p }], 
+                temperature: 0.2, 
+                top_p: 0.7, 
+                max_tokens: 4096, 
+                stream: false 
+            };
+            
+            const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+            const d = await r.json();
+            res = d.choices?.[0]?.message?.content || "";
+            
+        } else {
+            // Ollama (por defecto)
+            url = process.env.OLLAMA_URL || 'http://localhost:11434/v1/chat/completions';
+            model = process.env.OLLAMA_MODEL || 'qwen3.5:4b';
+            headers = { 'Content-Type': 'application/json' };
+            body = { 
+                model, 
+                messages: [{ role: 'user', content: p }], 
+                stream: false 
+            };
+            
+            const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+            const d = await r.json();
+            res = d.choices?.[0]?.message?.content || "";
+        }
         
         db.prepare('INSERT INTO agent_logs (session_id, agent_name, result, status, duration_ms, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?)')
           .run(sid, name, res, 'SUCCESS', Date.now() - start, PROVIDER, model);
-        console.log(`[OK] Agente ${name} (${sid}) - Provider: ${PROVIDER}`);
+        console.log(`[OK] Agente ${name} (${sid}) - Provider: ${PROVIDER}, Model: ${model}`);
     } catch (e) {
         db.prepare('INSERT INTO agent_logs (session_id, agent_name, result, status) VALUES (?, ?, ?, ?)')
           .run(sid, name, `Error: ${e.message}`, 'FAILED');
